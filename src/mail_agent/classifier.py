@@ -8,11 +8,11 @@ from __future__ import annotations
 import logging
 import re
 
-import llm_client
-import config
-import guardrails
-import notifier
-from gmail_client import EmailMessage
+from . import llm_client
+from . import config
+from . import guardrails
+from . import notifier
+from .gmail_client import EmailMessage
 
 logger = logging.getLogger(__name__)
 

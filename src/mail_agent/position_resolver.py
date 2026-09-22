@@ -9,10 +9,10 @@ import logging
 import re
 from dataclasses import dataclass
 
-import classifier
-import company_directory
-import config
-import job_page_fetcher
+from . import classifier
+from . import company_directory
+from . import config
+from . import job_page_fetcher
 
 logger = logging.getLogger(__name__)
 

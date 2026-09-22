@@ -11,10 +11,10 @@ REM path inside position_resolver.py, so this is belt-and-suspenders -- re-enabl
 REM both together once the matching logic is tightened and verified.
 cd /d "%~dp0"
 
-python review_closed_positions.py
-python main.py %*
-REM python backfill_career_links.py
-python validate_sheet.py
+python scripts\review_closed_positions.py
+python scripts\main.py %*
+REM python scripts\backfill_career_links.py
+python scripts\validate_sheet.py
 
 if errorlevel 1 (
     echo.

@@ -4,7 +4,7 @@ REM trigger fires more than once (e.g. Task Scheduler's missed-start catch-up la
 REM close to the normal 8am trigger, or multiple unlocks before 8am has been "used").
 cd /d "%~dp0"
 
-python morning_flag.py check
+python scripts\morning_flag.py check
 if %errorlevel%==0 (
     echo [run_morning] Already ran today, skipping.
     exit /b 0
@@ -25,8 +25,8 @@ REM with a still-backed-up mail queue for the same slow local LLM.
 if exist "data\mail_queue_incomplete.flag" (
     echo [run_morning] Mail queue not fully drained yet ^(see data\mail_queue_incomplete.flag^) -- skipping career-page scan this run.
 ) else (
-    python scan_career_pages.py
+    python scripts\scan_career_pages.py
 )
 
-python morning_flag.py mark
+python scripts\morning_flag.py mark
 echo [run_morning] Done, flag set for today.

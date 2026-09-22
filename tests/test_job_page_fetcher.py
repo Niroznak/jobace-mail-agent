@@ -1,5 +1,5 @@
 """Tests for the pure text-processing helpers in job_page_fetcher.py -- no network."""
-import job_page_fetcher as jpf
+from mail_agent import job_page_fetcher as jpf
 
 
 class TestIsClosedPosting:

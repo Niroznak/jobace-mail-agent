@@ -3,7 +3,11 @@ from __future__ import annotations
 
 import os
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+# This file lives at <repo_root>/src/mail_agent/config.py -- data/, logs/, and
+# credentials/ are repo-root-relative regardless of where the package itself is
+# installed from, so BASE_DIR climbs back up two levels rather than using this
+# file's own directory.
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 DATA_DIR = os.path.join(BASE_DIR, "data")
 LOGS_DIR = os.path.join(BASE_DIR, "logs")
 CREDENTIALS_DIR = os.path.join(BASE_DIR, "credentials")

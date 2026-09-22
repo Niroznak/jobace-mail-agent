@@ -3,7 +3,7 @@
 Network calls (job_page_fetcher.search_duckduckgo, is_link_usable) are mocked --
 these tests verify the caching/state-machine logic, not real web search.
 """
-import company_directory as cd
+from mail_agent import company_directory as cd
 
 
 def use_temp_csv(tmp_path, monkeypatch):

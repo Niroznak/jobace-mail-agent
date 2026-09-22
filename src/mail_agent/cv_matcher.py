@@ -6,9 +6,9 @@ import json
 import logging
 import os
 
-import job_page_fetcher
-import llm_client
-import config
+from . import job_page_fetcher
+from . import llm_client
+from . import config
 
 logger = logging.getLogger(__name__)
 

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
 
 try:
@@ -9,9 +10,11 @@ try:
 except Exception:
     pass
 
-import classifier
-import cv_matcher
-import gmail_client
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "src"))
+
+from mail_agent import classifier
+from mail_agent import cv_matcher
+from mail_agent import gmail_client
 
 query = sys.argv[1] if len(sys.argv) > 1 else "SCD"
 

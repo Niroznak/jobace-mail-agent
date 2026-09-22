@@ -4,7 +4,7 @@ REM Best-effort (many career sites are JS-rendered and yield no links) -- see RE
 REM Known Limitations.
 cd /d "%~dp0"
 
-python scan_career_pages.py %*
+python scripts\scan_career_pages.py %*
 
 if errorlevel 1 (
     echo.

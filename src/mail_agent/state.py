@@ -6,7 +6,7 @@ import json
 import os
 from datetime import date
 
-import config
+from . import config
 
 
 def load_processed_ids() -> set[str]:

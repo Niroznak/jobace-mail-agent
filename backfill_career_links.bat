@@ -3,7 +3,7 @@ REM Backfills missing url/description on tracked rows via career-site search.
 REM Best-effort (DuckDuckGo discovery) -- spot-check output before trusting it.
 cd /d "%~dp0"
 
-python backfill_career_links.py %*
+python scripts\backfill_career_links.py %*
 
 if errorlevel 1 (
     echo.

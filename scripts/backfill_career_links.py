@@ -15,11 +15,13 @@ import sys
 import time
 from datetime import datetime
 
-import config
-import cv_matcher
-import notifier
-import position_resolver
-import sheets_client
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "src"))
+
+from mail_agent import config
+from mail_agent import cv_matcher
+from mail_agent import notifier
+from mail_agent import position_resolver
+from mail_agent import sheets_client
 
 logger = logging.getLogger(__name__)
 

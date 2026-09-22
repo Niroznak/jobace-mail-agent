@@ -16,7 +16,7 @@ import logging
 import urllib.error
 import urllib.request
 
-import config
+from . import config
 
 logger = logging.getLogger(__name__)
 

@@ -20,7 +20,7 @@ import urllib.parse
 import urllib.request
 from dataclasses import dataclass
 
-import config
+from . import config
 
 logger = logging.getLogger(__name__)
 

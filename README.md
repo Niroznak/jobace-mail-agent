@@ -23,14 +23,27 @@ onboarding and as interview material.
 
 ## Architecture
 
+### Repo layout
+
+```
+src/mail_agent/   importable library code (config, classifier, sheets_client, ...)
+scripts/          runnable entry points (main.py, review_closed_positions.py, ...)
+tests/            pytest suite -- conftest.py puts both of the above on sys.path
+*.bat             Windows entry points; invoke scripts as `python scripts\<name>.py`
+```
+
+No package install step needed: every script in `scripts/` inserts `../src`
+onto `sys.path` itself before importing `mail_agent`, so `python scripts\main.py`
+works from a fresh clone with just `pip install -r requirements.txt`.
+
 ### The pipeline
 
 Independent scripts, chained in `run_mail_agent.bat`, each idempotent and safe
 to run alone:
 
 ```
-review_closed_positions.py  →  main.py  →  validate_sheet.py
-   (gray out stale rows)       (scan mail)   (audit for gaps)
+scripts/review_closed_positions.py  →  scripts/main.py  →  scripts/validate_sheet.py
+        (gray out stale rows)             (scan mail)          (audit for gaps)
 ```
 
 1. **`review_closed_positions.py`** — re-checks every tracked, still-open row's
@@ -247,7 +260,7 @@ fixtures otherwise.
 5. Create the Google Sheet tracker ([below](#google-sheet-setup)).
 6. Create the Gmail label ([below](#gmail-label-setup)).
 7. Put your CV at `cv.txt` (or set `CV_TEXT_PATH`).
-8. Run `python main.py --dry-run` to authorize and sanity-check ([below](#first-run-authorization)).
+8. Run `python scripts/main.py --dry-run` to authorize and sanity-check ([below](#first-run-authorization)).
 9. Optional: set up [career-page scanning](#company-career-page-scanning-optional),
    [commute filtering](#commute--location-filter), and
    [Task Scheduler automation](#automation--scheduling).
@@ -277,21 +290,21 @@ OAuth flow, authorized once via a browser sign-in.
 4. **Create OAuth client credentials**: Credentials → Create Credentials →
    OAuth client ID → Application type **Desktop app** → download the JSON
 5. **Place the credentials file** at `credentials/oauth_client_secret.json`
-   (path fixed in `config.py`'s `OAUTH_CLIENT_SECRET_PATH`)
+   (path fixed in `src/mail_agent/config.py`'s `OAUTH_CLIENT_SECRET_PATH`)
 
 ### Google Sheet setup
 
-1. Create a Sheet with a tab named `Jobs` (or update `SHEET_TAB` in `config.py`)
-2. Row 1 headers matching `SHEET_COLUMNS` in `config.py` (columns A–S): `url,
+1. Create a Sheet with a tab named `Jobs` (or update `SHEET_TAB` in `src/mail_agent/config.py`)
+2. Row 1 headers matching `SHEET_COLUMNS` in `src/mail_agent/config.py` (columns A–S): `url,
    title, company, location, date_saved, status, description, requirements,
    cv_suggestions, cover_letter, training_project, apply_date, recruiter_name,
    recruiter_phone, recruiter_email, notes, job_id, contact_name, fit_score`
 3. Copy the Sheet ID from its URL and set it via the `JOBACE_SHEET_ID` env var
-   or `config.py`'s `SHEET_ID`
+   or `src/mail_agent/config.py`'s `SHEET_ID`
 
 ### Gmail label setup
 
-Create a Gmail label called `Work` (or change `WORK_LABEL_NAME` in `config.py`).
+Create a Gmail label called `Work` (or change `WORK_LABEL_NAME` in `src/mail_agent/config.py`).
 This repo assumes a separate Gmail Apps Script tags job-related mail into this
 label every ~15 min (keeps each run's query small) — a manual filter works too.
 
@@ -304,7 +317,7 @@ pip install -r requirements.txt
 ### First run (authorization)
 
 ```bash
-python main.py --dry-run
+python scripts/main.py --dry-run
 ```
 
 Two browser consent windows will open (Gmail, then Sheets) — sign in and
@@ -316,7 +329,7 @@ Tokens cache to `data/token_gmail.json` / `data/token_sheets.json`.
 Once that succeeds:
 
 ```bash
-python main.py
+python scripts/main.py
 ```
 
 or double-click [run_mail_agent.bat](run_mail_agent.bat) (runs
@@ -341,7 +354,7 @@ range using `config.ALLOWED_LOCATION_KEYWORDS` / `EXCLUDED_LOCATION_KEYWORDS`
 both sets with your own city names, or empty `EXCLUDED_LOCATION_KEYWORDS` to
 disable location filtering entirely.
 
-### Configuration reference (`config.py`)
+### Configuration reference (`src/mail_agent/config.py`)
 
 | Setting | Purpose |
 |---|---|

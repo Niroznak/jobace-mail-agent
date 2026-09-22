@@ -1,6 +1,6 @@
 """Tests for cv_matcher's code-enforced hard-requirement score cap -- no Ollama calls."""
-import cv_matcher
-import llm_client
+from mail_agent import cv_matcher
+from mail_agent import llm_client
 
 
 class TestApplyHardRequirementCap:

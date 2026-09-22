@@ -8,9 +8,12 @@ from __future__ import annotations
 
 import argparse
 import os
+import sys
 from datetime import date
 
-import config
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "src"))
+
+from mail_agent import config
 
 FLAG_PATH = os.path.join(config.DATA_DIR, "last_morning_run.txt")
 

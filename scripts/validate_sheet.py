@@ -17,10 +17,12 @@ import os
 import sys
 from datetime import datetime
 
-import config
-import guardrails
-import notifier
-import sheets_client
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "src"))
+
+from mail_agent import config
+from mail_agent import guardrails
+from mail_agent import notifier
+from mail_agent import sheets_client
 
 logger = logging.getLogger(__name__)
 

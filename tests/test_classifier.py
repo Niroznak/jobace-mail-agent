@@ -1,5 +1,5 @@
 """Tests for the deterministic (non-LLM) parts of classifier.py -- no Ollama calls."""
-import classifier
+from mail_agent import classifier
 
 
 class TestStripWorkmodeSuffix:

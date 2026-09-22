@@ -12,9 +12,9 @@ import csv
 import logging
 import os
 
-import config
-import job_page_fetcher
-import notifier
+from . import config
+from . import job_page_fetcher
+from . import notifier
 
 logger = logging.getLogger(__name__)
 

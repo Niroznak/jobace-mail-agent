@@ -13,9 +13,9 @@ from dataclasses import dataclass
 
 from googleapiclient.discovery import Resource
 
-import guardrails
-import notifier
-import sheets_client
+from . import guardrails
+from . import notifier
+from . import sheets_client
 
 logger = logging.getLogger(__name__)
 

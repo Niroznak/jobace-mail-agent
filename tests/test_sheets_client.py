@@ -1,5 +1,5 @@
 """Tests for the pure/deterministic helpers in sheets_client.py -- no network calls."""
-import sheets_client as sc
+from mail_agent import sheets_client as sc
 
 
 class TestNormalizeTitle:

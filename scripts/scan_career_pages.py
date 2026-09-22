@@ -19,16 +19,18 @@ import sys
 import time
 from datetime import datetime
 
-import classifier
-import company_directory
-import config
-import cv_matcher
-import job_page_fetcher
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "src"))
+
+from mail_agent import classifier
+from mail_agent import company_directory
+from mail_agent import config
+from mail_agent import cv_matcher
+from mail_agent import job_page_fetcher
 import main
-import notifier
-import position_sheet
-import sheets_client
-import state
+from mail_agent import notifier
+from mail_agent import position_sheet
+from mail_agent import sheets_client
+from mail_agent import state
 
 logger = logging.getLogger(__name__)
 
