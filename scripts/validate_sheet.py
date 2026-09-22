@@ -40,10 +40,18 @@ def setup_logging() -> None:
     )
 
 
+def _is_terminal(row: dict) -> bool:
+    """closed/nr rows are done -- review_closed_positions.py already grayed them out
+    and nothing in this pipeline ever revisits them. Re-flagging a historical gap on
+    one of these every single run is pure noise: the row was already reviewed once
+    (that's what put it in this state), and there's no path that will ever fix it."""
+    return sheets_client.is_row_closed(row) or sheets_client.is_row_not_relevant(row)
+
+
 def _missing_content(row: dict) -> bool:
     """An active, trackable row (not closed/nr) with neither a link nor a description
     is unreviewable -- there's nothing to look at to judge fit or find the posting."""
-    if sheets_client.is_row_closed(row) or sheets_client.is_row_not_relevant(row):
+    if _is_terminal(row):
         return False
     return not row.get("url", "").strip() and not row.get("description", "").strip()
 
@@ -59,6 +67,8 @@ def run() -> dict:
     identity_problems = []
     content_problems = []
     for row in rows:
+        if _is_terminal(row):
+            continue
         missing = guardrails.missing_identity_fields(row)
         if missing:
             identity_problems.append((row["_row"], missing, row))
