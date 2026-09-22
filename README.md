@@ -23,6 +23,8 @@ onboarding and as interview material.
 
 ## Architecture
 
+![Pipeline diagram: Gmail feeds main.py, which calls a local Ollama LLM to classify email and score CV fit, verifies the posting via position_resolver, validates it through guardrails.py, and writes it to the Google Sheet via position_sheet.py, with notifier.py firing toasts. review_closed_positions.py, validate_sheet.py, and the optional scan_career_pages.py run around the same sheet. Everything except the Gmail/Sheets API calls stays on your machine, at zero cost.](docs/pipeline-diagram.svg)
+
 ### Repo layout
 
 ```

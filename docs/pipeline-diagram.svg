@@ -1,0 +1,89 @@
+<svg viewBox="0 0 1000 640" xmlns="http://www.w3.org/2000/svg" font-family="-apple-system,Segoe UI,Helvetica,Arial,sans-serif">
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#64748b"/>
+    </marker>
+    <marker id="arrowGreen" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#16a34a"/>
+    </marker>
+  </defs>
+
+  <rect x="0" y="0" width="1000" height="640" fill="#f8fafc"/>
+
+  <!-- Privacy boundary -->
+  <rect x="40" y="30" width="920" height="430" rx="16" fill="#eef2ff" stroke="#818cf8" stroke-width="2" stroke-dasharray="6 5"/>
+  <text x="60" y="58" font-size="15" font-weight="700" fill="#4338ca">Your machine — everything inside this box stays local, never sent to any third-party AI</text>
+
+  <!-- Gmail -->
+  <rect x="70" y="90" width="170" height="70" rx="10" fill="#fff" stroke="#334155" stroke-width="1.5"/>
+  <text x="155" y="118" text-anchor="middle" font-size="14" font-weight="600" fill="#0f172a">Gmail</text>
+  <text x="155" y="136" text-anchor="middle" font-size="11.5" fill="#475569">"Work" label</text>
+
+  <!-- main.py -->
+  <rect x="300" y="90" width="200" height="70" rx="10" fill="#fff" stroke="#334155" stroke-width="1.5"/>
+  <text x="400" y="118" text-anchor="middle" font-size="14" font-weight="600" fill="#0f172a">main.py</text>
+  <text x="400" y="136" text-anchor="middle" font-size="11.5" fill="#475569">fetch + dedup new mail</text>
+
+  <!-- Local LLM -->
+  <rect x="560" y="80" width="230" height="90" rx="10" fill="#ecfdf5" stroke="#16a34a" stroke-width="2"/>
+  <text x="675" y="108" text-anchor="middle" font-size="14" font-weight="700" fill="#166534">Ollama (local LLM)</text>
+  <text x="675" y="126" text-anchor="middle" font-size="11.5" fill="#166534">classify email + score CV fit</text>
+  <text x="675" y="142" text-anchor="middle" font-size="11" fill="#166534" font-style="italic">free, offline, no API key</text>
+
+  <!-- position_resolver -->
+  <rect x="300" y="200" width="200" height="70" rx="10" fill="#fff" stroke="#334155" stroke-width="1.5"/>
+  <text x="400" y="228" text-anchor="middle" font-size="14" font-weight="600" fill="#0f172a">position_resolver</text>
+  <text x="400" y="246" text-anchor="middle" font-size="11.5" fill="#475569">verify real posting text</text>
+
+  <!-- guardrails -->
+  <rect x="560" y="200" width="230" height="70" rx="10" fill="#fff7ed" stroke="#ea580c" stroke-width="1.5"/>
+  <text x="675" y="228" text-anchor="middle" font-size="14" font-weight="700" fill="#9a3412">guardrails.py</text>
+  <text x="675" y="246" text-anchor="middle" font-size="11.5" fill="#9a3412">reject implausible/hallucinated output</text>
+
+  <!-- position_sheet -->
+  <rect x="300" y="310" width="200" height="70" rx="10" fill="#fff" stroke="#334155" stroke-width="1.5"/>
+  <text x="400" y="338" text-anchor="middle" font-size="14" font-weight="600" fill="#0f172a">position_sheet.py</text>
+  <text x="400" y="356" text-anchor="middle" font-size="11.5" fill="#475569">build validated row</text>
+
+  <!-- Google Sheet -->
+  <rect x="70" y="380" width="170" height="70" rx="10" fill="#fff" stroke="#334155" stroke-width="1.5"/>
+  <text x="155" y="408" text-anchor="middle" font-size="14" font-weight="600" fill="#0f172a">Google Sheet</text>
+  <text x="155" y="426" text-anchor="middle" font-size="11.5" fill="#475569">jobAce tracker</text>
+
+  <!-- Notifier -->
+  <rect x="560" y="310" width="230" height="70" rx="10" fill="#fff" stroke="#334155" stroke-width="1.5"/>
+  <text x="675" y="338" text-anchor="middle" font-size="14" font-weight="600" fill="#0f172a">notifier.py</text>
+  <text x="675" y="356" text-anchor="middle" font-size="11.5" fill="#475569">Windows toast — new match / needs review</text>
+
+  <!-- validate_sheet -->
+  <rect x="70" y="480" width="220" height="70" rx="10" fill="#fff" stroke="#334155" stroke-width="1.5"/>
+  <text x="180" y="508" text-anchor="middle" font-size="14" font-weight="600" fill="#0f172a">validate_sheet.py</text>
+  <text x="180" y="526" text-anchor="middle" font-size="11.5" fill="#475569">post-run audit for gaps</text>
+
+  <!-- review_closed_positions -->
+  <rect x="330" y="480" width="240" height="70" rx="10" fill="#fff" stroke="#334155" stroke-width="1.5"/>
+  <text x="450" y="508" text-anchor="middle" font-size="14" font-weight="600" fill="#0f172a">review_closed_positions.py</text>
+  <text x="450" y="526" text-anchor="middle" font-size="11.5" fill="#475569">gray out stale postings</text>
+
+  <!-- scan_career_pages -->
+  <rect x="610" y="480" width="240" height="70" rx="10" fill="#fff" stroke="#334155" stroke-width="1.5"/>
+  <text x="730" y="508" text-anchor="middle" font-size="14" font-weight="600" fill="#0f172a">scan_career_pages.py</text>
+  <text x="730" y="526" text-anchor="middle" font-size="11.5" fill="#475569">optional: proactive career-page scan</text>
+
+  <!-- Arrows main flow -->
+  <line x1="240" y1="122" x2="298" y2="122" stroke="#64748b" stroke-width="2" marker-end="url(#arrow)"/>
+  <line x1="500" y1="118" x2="558" y2="118" stroke="#64748b" stroke-width="2" marker-end="url(#arrow)"/>
+  <line x1="400" y1="160" x2="400" y2="198" stroke="#64748b" stroke-width="2" marker-end="url(#arrow)"/>
+  <line x1="500" y1="230" x2="558" y2="230" stroke="#64748b" stroke-width="2" marker-end="url(#arrow)"/>
+  <line x1="400" y1="270" x2="400" y2="308" stroke="#64748b" stroke-width="2" marker-end="url(#arrow)"/>
+  <line x1="300" y1="345" x2="242" y2="405" stroke="#16a34a" stroke-width="2.2" marker-end="url(#arrowGreen)"/>
+  <line x1="500" y1="345" x2="558" y2="345" stroke="#16a34a" stroke-width="2.2" marker-end="url(#arrowGreen)"/>
+
+  <!-- Scheduled runs feeding sheet-adjacent scripts -->
+  <line x1="180" y1="450" x2="180" y2="478" stroke="#94a3b8" stroke-width="1.8" marker-end="url(#arrow)"/>
+  <line x1="290" y1="500" x2="155" y2="450" stroke="#94a3b8" stroke-width="1.8" marker-end="url(#arrow)" stroke-dasharray="4 4"/>
+  <line x1="610" y1="500" x2="500" y2="345" stroke="#94a3b8" stroke-width="1.8" marker-end="url(#arrow)" stroke-dasharray="4 4"/>
+
+  <text x="450" y="580" text-anchor="middle" font-size="12.5" fill="#475569">All three scripts run unattended via Windows Task Scheduler, 3x/day. Only Gmail + Sheets API calls (your own OAuth) leave this machine.</text>
+  <text x="450" y="605" text-anchor="middle" font-size="12.5" font-weight="700" fill="#166534">$0 cost — free APIs + free local LLM, no subscriptions, no per-token billing.</text>
+</svg>
