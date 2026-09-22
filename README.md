@@ -19,17 +19,18 @@ onboarding and as interview material.
 - [Setup](#setup)
 - [Automation / scheduling](#automation--scheduling)
 - [Known limitations](#known-limitations)
+- [License](#license)
 
 ## Architecture
 
-### The three pipelines
+### The pipeline
 
-Three independent scripts, chained in `run_mail_agent.bat`, each idempotent and
-safe to run alone:
+Independent scripts, chained in `run_mail_agent.bat`, each idempotent and safe
+to run alone:
 
 ```
-review_closed_positions.py  →  main.py  →  backfill_career_links.py
-   (gray out stale rows)       (scan mail)   (fill in gaps)
+review_closed_positions.py  →  main.py  →  validate_sheet.py
+   (gray out stale rows)       (scan mail)   (audit for gaps)
 ```
 
 1. **`review_closed_positions.py`** — re-checks every tracked, still-open row's
@@ -40,29 +41,40 @@ review_closed_positions.py  →  main.py  →  backfill_career_links.py
    a freshly-cleaned active set.
 2. **`main.py`** — the core mail scan. Fetches unread/new mail from the Gmail
    `Work` label, classifies each message, dedups against tracked rows, scores CV
-   fit via Ollama, and appends new rows or updates existing ones.
-3. **`backfill_career_links.py`** — retrofits rows that ended up with no
-   `url`/`description` (e.g. an application-reply email arrived with no original
-   job-opportunity email ever seen). Looks up the company's career page in
-   `tracked_companies.csv`, finds the specific position on it, and fills the gap.
-   Gives up (marks `nr`) after `MAX_RESOLUTION_ATTEMPTS` failed tries rather than
-   retrying forever.
+   fit via Ollama, and appends new rows (via `position_sheet.append_position`) or
+   updates existing ones.
+3. **`validate_sheet.py`** — post-run audit: flags (never edits) any row still
+   missing company/title, or an active row stuck with no url/description past
+   `MAX_RESOLUTION_ATTEMPTS`, so gaps surface in one summary notification instead
+   of a manual sheet read-through.
+
+`backfill_career_links.py` (retrofits rows with no `url`/`description` by
+searching the company's career page) and `scan_career_pages.py` (proactively
+scans career pages for new postings, run separately via `run_morning.bat`) both
+exist but `config.ENABLE_CAREER_SITE_SEARCH` is currently `False` — the
+career-site fuzzy title-match produced a confirmed false positive (a "found"
+position that didn't actually exist on the page). `backfill_career_links.py` is
+also commented out of `run_mail_agent.bat` pending a fix to that matching logic.
 
 ### Module map
 
 | Module | Responsibility |
 |---|---|
 | `gmail_client.py` | Gmail OAuth, fetch mail from the `Work` label, parse MIME into a plain-text `EmailMessage` (with its *real* received date, not the run date). |
-| `sheets_client.py` | Sheets OAuth, row read/upsert, and most of the tracker's business rules: dedup lookups, company/title normalization, status-history formatting, the basic-filter refresh. |
-| `classifier.py` | All non-LLM (regex/deterministic) email parsing — LinkedIn digest splitting, junior/intern and location filtering, workmode-suffix stripping — plus the one LLM call for triaging a single email (category/company/title/status). |
+| `sheets_client.py` | Sheets OAuth, mechanical row read/write, and the tracker's business rules: dedup lookups, company/title normalization, status-history formatting, the basic-filter refresh. |
+| `position_sheet.py` | The one entry point for writing a new row: `PositionRecord` (a dataclass with no default for company/title/status/date_saved) + `append_position`, which validates identity fields before ever calling `sheets_client.append_row`. |
+| `guardrails.py` | Every "is this trustworthy enough to write/believe" check in one place: required identity fields for a sheet row, and the LLM-triage plausibility check (catches a local model leaking raw reasoning into a field instead of a real answer). |
+| `classifier.py` | All non-LLM (regex/deterministic) email parsing — LinkedIn digest splitting, junior/intern and location filtering, workmode-suffix stripping — plus the one LLM call for triaging a single email (category/company/title/status), validated via `guardrails`. |
+| `llm_client.py` | Single-shot JSON-mode calls to a local Ollama model, with retry-once-on-failure. |
 | `cv_matcher.py` | Loads/caches a parsed CV profile, and scores a job's real fetched description against it via Ollama. Enforces the hard-requirement score cap in code, not left to the LLM's own arithmetic. |
 | `job_page_fetcher.py` | Plain-HTTP fetching: LinkedIn posting retrieval (canonical-URL retry logic), a generic fetch for any other URL, closed-posting detection, and DuckDuckGo search (best-effort, often blocked — see [Known limitations](#known-limitations)). |
 | `company_directory.py` | Self-healing `tracked_companies.csv` — checks the CSV before ever searching, verifies a cached link is still live, and remembers a failed search so it's never silently retried every run. |
-| `position_resolver.py` | Ties the above together: given a company/title (and optionally an email body), makes a real effort to find a verified link + description + confirmed company name. Never fabricates — returns blank fields if nothing checks out. |
+| `position_resolver.py` | Ties the above together: given a company/title (and optionally an email body), makes a real effort to find a verified link + description + confirmed company name. Never fabricates — returns blank fields if nothing checks out. Career-site search is currently disabled (`config.ENABLE_CAREER_SITE_SEARCH`). |
 | `notifier.py` | Windows toast notifications — new matches, and anything that needs manual attention. |
 | `state.py` | Local JSON/CSV state: processed-message dedup, and a recoverable log of scored-but-rejected candidates. |
 | `main.py` | Orchestrates the mail-scan pipeline: triage → dedup → resolve → score → write. |
-| `review_closed_positions.py`, `backfill_career_links.py` | The other two pipeline scripts (see above). |
+| `review_closed_positions.py`, `validate_sheet.py` | The other two active pipeline scripts (see above). |
+| `backfill_career_links.py`, `scan_career_pages.py` | Career-site search scripts, currently disabled/unwired pending a matching-accuracy fix (see above). |
 | `morning_flag.py` | Dedup flag so the "morning" scheduled task only actually runs once per day even if Task Scheduler's sleep-catchup and a normal firing both land the same morning. |
 
 ### Data flow for one new email
@@ -206,7 +218,7 @@ through a specific day's rotated log.
 python -m pytest tests/
 ```
 
-83 tests covering the deterministic/pure logic — no network, no Gmail/Sheets
+99 tests covering the deterministic/pure logic — no network, no Gmail/Sheets
 API, no Ollama calls. Each test file targets one module; most tests are
 written directly against a real bug found this week rather than a generic
 happy-path case, e.g.:
@@ -225,6 +237,20 @@ machine's default `%TEMP%` had a permissions issue that broke `tmp_path`
 fixtures otherwise.
 
 ## Setup
+
+### Quick start (order to follow)
+
+1. Clone this repo and `cd` into it.
+2. Install [Ollama](https://ollama.com/) and pull a model (see [Prerequisites](#prerequisites)).
+3. `pip install -r requirements.txt`.
+4. Set up a Google Cloud project + OAuth credentials ([below](#google-cloud-project-setup)).
+5. Create the Google Sheet tracker ([below](#google-sheet-setup)).
+6. Create the Gmail label ([below](#gmail-label-setup)).
+7. Put your CV at `cv.txt` (or set `CV_TEXT_PATH`).
+8. Run `python main.py --dry-run` to authorize and sanity-check ([below](#first-run-authorization)).
+9. Optional: set up [career-page scanning](#company-career-page-scanning-optional),
+   [commute filtering](#commute--location-filter), and
+   [Task Scheduler automation](#automation--scheduling).
 
 ### Prerequisites
 
@@ -364,3 +390,7 @@ Get-ScheduledTaskInfo -TaskName "LocalMailAgent_Morning" | Select-Object LastRun
   consent screen is in "Testing" publish status — re-run any script
   interactively to reauthorize when this happens (now announced via a desktop
   notification instead of failing silently).
+
+## License
+
+[MIT](LICENSE) — use, modify, and redistribute freely, no warranty.
