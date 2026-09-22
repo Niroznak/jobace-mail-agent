@@ -1,0 +1,48 @@
+data/
+credentials/
+logs/
+__pycache__/
+*.pyc
+.pytest_cache/
+.pytest_tmp/
+.venv/
+venv/
+*.env
+.env
+
+# Local Claude Code settings (machine-specific paths) and lock files -- not portable,
+# not meant to be shared.
+.claude/settings.json
+.claude/settings.local.json
+.claude/scheduled_tasks.lock
+
+# Personal job-search data -- your real target companies and dev-session history.
+# tracked_companies.example.csv ships instead as a template for a fresh setup.
+tracked_companies.csv
+tasks/lessons.md
+tasks/todo.md
+
+# Your own CV text -- point CV_TEXT_PATH (config.py) at wherever you keep this.
+cv.txt
+
+# Ad-hoc debug/scratch dumps from past investigations -- real sheet rows, LinkedIn
+# tracking URLs, and application data landed in these at the repo root over time.
+# They're personal data, not source, and were never meant to be committed.
+anomaly_dump.txt
+comeet_debug.txt
+comet_dump.txt
+current_sheet*.txt
+digest_ids_to_unmark.json
+final_sheet*.txt
+genecit_*.txt
+hard_req_test_out.txt
+hexight_full.txt
+history_test.txt
+interview_retest.txt
+maytronics_trace.txt
+mobileye_retest.txt
+rafael_full.txt
+row*.txt
+scd_debug.txt
+status_route_*.txt
+tracked_companies.xlsx
