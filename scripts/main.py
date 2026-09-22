@@ -19,6 +19,7 @@ from mail_agent import classifier
 from mail_agent import config
 from mail_agent import cv_matcher
 from mail_agent import gmail_client
+from mail_agent import guardrails
 from mail_agent import job_page_fetcher
 from mail_agent import notifier
 from mail_agent import position_resolver
@@ -367,34 +368,6 @@ def _apply_status_signal(
     return False
 
 
-def _resolve_reply_target_row(sheet_rows: list[dict], company: str, title: str) -> tuple[dict | None, list[dict], str]:
-    """Finds which tracked row an application-reply/status email is about. Returns
-    (row, ambiguous_candidates, match_tier). Exactly one row for the company is
-    unambiguous and returned even without a title match (the common case: one
-    tracked role per company) -- UNLESS the incoming email states a specific title
-    that actively conflicts with that one row's own specific title, which means it's
-    almost certainly a second, distinct, never-before-seen position at that company
-    (real case: two same-day Mercor rejections, "Excel Expert - Finance" and "Excel
-    Expert - General", silently merged into one row before this check existed --
-    both had real, distinct role_titles, so this wasn't a "missing title" case at
-    all). With multiple rows, a title match disambiguates; failing that, returns
-    (None, candidates, "") rather than guessing -- silently picking "first row for
-    this company" is exactly what wrote an "applied" status to the wrong Mobileye
-    row (and, combined with a company-name mismatch, created a stray duplicate for
-    Micron/"Micron Technology") before that guard existed."""
-    title_match = sheets_client.find_row_by_company_and_title(sheet_rows, company, title)
-    if title_match:
-        return title_match, [], "title_match"
-    candidates = sheets_client.find_rows_by_company(sheet_rows, company)
-    if len(candidates) <= 1:
-        single = candidates[0] if candidates else None
-        if single and title.strip() and single.get("title", "").strip():
-            if sheets_client.normalize_title(title) != sheets_client.normalize_title(single["title"]):
-                return None, [single], "title_conflict"
-        return single, [], "single_company_row"
-    return None, candidates, ""
-
-
 def _flag_ambiguous_status_update(company: str, title: str, triage: dict, candidates: list[dict]) -> None:
     _run_stats["ambiguous"] += 1
     row_numbers = [c["_row"] for c in candidates]
@@ -424,7 +397,7 @@ def _handle_possible_status_update(msg, posting: dict, sheets, sheet_rows: list[
     matched_row = sheets_client.find_row_by_job_id(sheet_rows, jid)
     match_tier = "job_id"
     if not matched_row:
-        matched_row, ambiguous, match_tier = _resolve_reply_target_row(sheet_rows, company, posting["title"])
+        matched_row, ambiguous, match_tier = guardrails.resolve_reply_target_row(sheet_rows, company, posting["title"])
         if ambiguous:
             _flag_ambiguous_status_update(company, posting["title"], triage, ambiguous)
             return False
@@ -467,7 +440,7 @@ def _handle_message(msg, gmail, sheets, sheet_rows: list[dict], dry_run: bool) -
     company = triage.get("company", "")
 
     if category == "application_reply" and company and not classifier.is_platform_company_name(company):
-        matched_row, ambiguous, match_tier = _resolve_reply_target_row(sheet_rows, company, triage.get("role_title", ""))
+        matched_row, ambiguous, match_tier = guardrails.resolve_reply_target_row(sheet_rows, company, triage.get("role_title", ""))
         if ambiguous:
             _flag_ambiguous_status_update(company, triage.get("role_title", ""), triage, ambiguous)
             return False
@@ -500,7 +473,7 @@ def _handle_message(msg, gmail, sheets, sheet_rows: list[dict], dry_run: bool) -
         # genuinely distinct reply for the same company later in the same run (two
         # same-day Mercor rejections, "Excel Expert - Finance" vs "- General") saw a
         # title-less row in memory and silently merged into it via the
-        # single-company-row fallback in _resolve_reply_target_row.
+        # single-company-row fallback in guardrails.resolve_reply_target_row.
         sheet_rows.append({**record.to_sheet_fields(), "_row": row_number})
         return False
 
