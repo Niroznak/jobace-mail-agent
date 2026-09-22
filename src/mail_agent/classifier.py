@@ -182,6 +182,24 @@ PLATFORM_SENDER_DOMAINS = {
     "em.remotejobs.io", "mg.flexjobs.com", "jobgether.com", "glassdoor.com",
 }
 
+# Real incident: qwen2.5:7b reproducibly (3/3 attempts, not a fluke) misclassified
+# "Thank you for your application to Warner Music Group" -- an unambiguous ATS
+# acknowledgment with zero ambiguity -- as category=job_opportunity with an empty
+# company. Combined with the sender being on a known ATS domain (hire.lever.co),
+# that emptied-company job_opportunity read triggered the "no identifiable hiring
+# company" skip path in main.py, which marks the message read -- permanently
+# dropping a real status update with no retry, since nothing else ever revisits an
+# already-read message. This phrasing is extremely templated across ATSes (Lever,
+# Greenhouse, Workday, etc.) and near-zero-risk to match deterministically, so it
+# overrides a wrong LLM category rather than trusting a model this small to get
+# every case right.
+_APPLICATION_ACK_SUBJECT_RE = re.compile(
+    r"thank you for (your interest|applying|your application)"
+    r"|(we|thanks).{0,25}received your application"
+    r"|your application (to|for|at|has been)",
+    re.IGNORECASE,
+)
+
 _TRIAGE_PROMPT = """\
 You are triaging an email for a job seeker. Read the email and answer with ONLY valid JSON, no markdown fences:
 {{
@@ -249,6 +267,19 @@ def classify_email(msg: EmailMessage) -> dict:
         return default
 
     default.update(result)
+
+    if default["category"] != "application_reply" and _APPLICATION_ACK_SUBJECT_RE.search(msg.subject or ""):
+        logger.info(
+            "[SUBJECT OVERRIDE] '%s' -> LLM said category=%r, but subject is an unmistakable "
+            "application-acknowledgment pattern; overriding to application_reply/applied.",
+            msg.subject, default["category"],
+        )
+        default["category"] = "application_reply"
+        if not default["company"]:
+            default["company"] = msg.sender_name
+        if not default["status"]:
+            default["status"] = "applied"
+
     return default
 
 

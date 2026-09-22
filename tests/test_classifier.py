@@ -1,5 +1,14 @@
 """Tests for the deterministic (non-LLM) parts of classifier.py -- no Ollama calls."""
 from mail_agent import classifier
+from mail_agent import llm_client
+from mail_agent.gmail_client import EmailMessage
+
+
+def _msg(subject: str, sender_name: str = "", sender_email: str = "", body: str = "") -> EmailMessage:
+    return EmailMessage(
+        id="x", thread_id="x", sender_name=sender_name, sender_email=sender_email,
+        subject=subject, body=body, snippet=body, date_utc="2026-01-01",
+    )
 
 
 class TestStripWorkmodeSuffix:
@@ -133,3 +142,46 @@ View job: https://www.linkedin.com/comm/jobs/view/2222222222/?trackingId=bbb
         assert len(postings) == 1
         assert postings[0]["company"] == "Maytronics"
         assert postings[0]["position_id"] == "4454742342"
+
+
+class TestApplicationAckSubjectOverride:
+    """Real incident: qwen2.5:7b reproducibly (3/3 attempts) misclassified "Thank you
+    for your application to Warner Music Group" -- a templated ATS acknowledgment with
+    zero real ambiguity -- as category=job_opportunity with an empty company. Combined
+    with the sender being on a known ATS domain, that triggered main.py's "no
+    identifiable hiring company" skip path, which marks the message read -- permanently
+    dropping a real status update with no retry. classify_email now overrides a wrong
+    category when the subject unmistakably matches this pattern."""
+
+    def test_overrides_wrong_job_opportunity_category(self, monkeypatch):
+        monkeypatch.setattr(
+            llm_client, "call_json",
+            lambda prompt: {"category": "job_opportunity", "company": "", "role_title": "",
+                             "position_id": "", "contact_name": "", "location": "", "status": "", "notes": ""},
+        )
+        msg = _msg("Thank you for your application to Warner Music Group", sender_name="Warner Music Group")
+        result = classifier.classify_email(msg)
+        assert result["category"] == "application_reply"
+        assert result["company"] == "Warner Music Group"
+        assert result["status"] == "applied"
+
+    def test_does_not_override_a_correct_category_or_populated_fields(self, monkeypatch):
+        # Should never clobber real LLM-extracted fields when they're already present.
+        monkeypatch.setattr(
+            llm_client, "call_json",
+            lambda prompt: {"category": "application_reply", "company": "Acme", "role_title": "Engineer",
+                             "position_id": "", "contact_name": "", "location": "", "status": "interview", "notes": ""},
+        )
+        msg = _msg("Thank you for your application to Acme", sender_name="Acme")
+        result = classifier.classify_email(msg)
+        assert result["status"] == "interview"
+
+    def test_unrelated_subject_is_not_affected(self, monkeypatch):
+        monkeypatch.setattr(
+            llm_client, "call_json",
+            lambda prompt: {"category": "job_opportunity", "company": "Acme", "role_title": "Engineer",
+                             "position_id": "", "contact_name": "", "location": "", "status": "", "notes": ""},
+        )
+        msg = _msg("New job alert: Engineer at Acme", sender_name="LinkedIn")
+        result = classifier.classify_email(msg)
+        assert result["category"] == "job_opportunity"
