@@ -59,15 +59,28 @@ class TestNextStatus:
 
 
 class TestResolveReplyTargetRow:
-    def test_single_row_for_company_is_unambiguous_without_title_match(self):
-        # The common case: one tracked role per company. Real title-extraction
-        # wording from an LLM triage often won't exactly match the stored title, but
-        # there's nothing else it could be about.
+    def test_single_row_for_company_is_unambiguous_when_reply_has_no_title(self):
+        # The common case: one tracked role per company, and the reply email itself
+        # carries no extractable title (e.g. a terse ack) -- nothing else it could be
+        # about, since there's no title information to conflict with.
         rows = [{"company": "ONE datAI", "title": "Data & AI Leader", "_row": 59}]
-        row, ambiguous, tier = main._resolve_reply_target_row(rows, "ONE datAI", "some other wording")
+        row, ambiguous, tier = main._resolve_reply_target_row(rows, "ONE datAI", "")
         assert row["_row"] == 59
         assert ambiguous == []
         assert tier == "single_company_row"
+
+    def test_single_row_but_conflicting_title_is_flagged_not_guessed(self):
+        # Real bug: two same-day Mercor rejections ("Excel Expert - Finance" and
+        # "Excel Expert - General") silently merged into one row because the single-
+        # company-row fallback trusted any title, even one that actively conflicts
+        # with the one tracked row's own specific title. A reply that states a real,
+        # different title is evidence of a second, distinct position -- not "the
+        # LLM just phrased it differently" -- and must be flagged, not guessed.
+        rows = [{"company": "Mercor", "title": "Excel Expert - Finance", "_row": 94}]
+        row, ambiguous, tier = main._resolve_reply_target_row(rows, "Mercor", "Excel Expert - General")
+        assert row is None
+        assert ambiguous == [rows[0]]
+        assert tier == "title_conflict"
 
     def test_multiple_rows_disambiguated_by_exact_title(self):
         rows = [

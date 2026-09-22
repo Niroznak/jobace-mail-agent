@@ -235,18 +235,22 @@ def _handle_digest_posting(posting: dict, sheets, sheet_rows: list[dict], dry_ru
 
     logger.info("[NEW MATCH] '%s @ %s' score=%s -> appending row + notifying.", title, company, score)
     notes = sheets_client.append_status_history(score_result.get("summary", ""), config.STATUS_NOT_APPLIED_YET, date_utc)
+    record = position_sheet.PositionRecord(
+        company=company, title=title, status=config.STATUS_NOT_APPLIED_YET, date_saved=date_utc,
+        url=posting["url"], location=posting["location"],
+        description=description[:config.DESCRIPTION_STORE_CHARS], notes=notes,
+        job_id=jid, fit_score=score,
+    )
     row_number = -1
     if not dry_run:
-        row_number = position_sheet.append_position(sheets, position_sheet.PositionRecord(
-            company=company, title=title, status=config.STATUS_NOT_APPLIED_YET, date_saved=date_utc,
-            url=posting["url"], location=posting["location"],
-            description=description[:config.DESCRIPTION_STORE_CHARS], notes=notes,
-            job_id=jid, fit_score=score,
-        ))
+        row_number = position_sheet.append_position(sheets, record)
         notifier.notify_new_match(company, title, score)
+    # Mirrors the real write (see PositionRecord) rather than a blank-title stub --
+    # a stale in-memory title is exactly what let a second, distinct same-company
+    # reply (e.g. two Mercor rejections, "Excel Expert - Finance" vs "- General")
+    # silently merge into this row later in the same run, before this existed.
     sheet_rows.append({
-        **dict.fromkeys(config.SHEET_COLUMNS, ""), "company": company, "job_id": jid,
-        "status": config.STATUS_NOT_APPLIED_YET, "_row": row_number,
+        **record.to_sheet_fields(), "_row": row_number,
     })
     return False
 
@@ -309,18 +313,18 @@ def _handle_generic_digest_posting(posting: dict, sheets, sheet_rows: list[dict]
 
     logger.info("[NEW MATCH] '%s @ %s' score=%s -> appending row + notifying.", title, company, score)
     notes = sheets_client.append_status_history(score_result.get("summary", ""), config.STATUS_NOT_APPLIED_YET, date_utc)
+    record = position_sheet.PositionRecord(
+        company=company, title=title, status=config.STATUS_NOT_APPLIED_YET, date_saved=date_utc,
+        url=posting.get("url", ""), location=posting["location"],
+        description=description[:config.DESCRIPTION_STORE_CHARS], notes=notes,
+        job_id=jid, fit_score=score,
+    )
     row_number = -1
     if not dry_run:
-        row_number = position_sheet.append_position(sheets, position_sheet.PositionRecord(
-            company=company, title=title, status=config.STATUS_NOT_APPLIED_YET, date_saved=date_utc,
-            url=posting.get("url", ""), location=posting["location"],
-            description=description[:config.DESCRIPTION_STORE_CHARS], notes=notes,
-            job_id=jid, fit_score=score,
-        ))
+        row_number = position_sheet.append_position(sheets, record)
         notifier.notify_new_match(company, title, score)
     sheet_rows.append({
-        **dict.fromkeys(config.SHEET_COLUMNS, ""), "company": company, "job_id": jid,
-        "status": config.STATUS_NOT_APPLIED_YET, "_row": row_number,
+        **record.to_sheet_fields(), "_row": row_number,
     })
     return False
 
@@ -367,17 +371,27 @@ def _resolve_reply_target_row(sheet_rows: list[dict], company: str, title: str) 
     """Finds which tracked row an application-reply/status email is about. Returns
     (row, ambiguous_candidates, match_tier). Exactly one row for the company is
     unambiguous and returned even without a title match (the common case: one
-    tracked role per company). With multiple rows, a title match disambiguates;
-    failing that, returns (None, candidates, "") rather than guessing -- silently
-    picking "first row for this company" is exactly what wrote an "applied" status
-    to the wrong Mobileye row (and, combined with a company-name mismatch, created a
-    stray duplicate for Micron/"Micron Technology") before this guard existed."""
+    tracked role per company) -- UNLESS the incoming email states a specific title
+    that actively conflicts with that one row's own specific title, which means it's
+    almost certainly a second, distinct, never-before-seen position at that company
+    (real case: two same-day Mercor rejections, "Excel Expert - Finance" and "Excel
+    Expert - General", silently merged into one row before this check existed --
+    both had real, distinct role_titles, so this wasn't a "missing title" case at
+    all). With multiple rows, a title match disambiguates; failing that, returns
+    (None, candidates, "") rather than guessing -- silently picking "first row for
+    this company" is exactly what wrote an "applied" status to the wrong Mobileye
+    row (and, combined with a company-name mismatch, created a stray duplicate for
+    Micron/"Micron Technology") before that guard existed."""
     title_match = sheets_client.find_row_by_company_and_title(sheet_rows, company, title)
     if title_match:
         return title_match, [], "title_match"
     candidates = sheets_client.find_rows_by_company(sheet_rows, company)
     if len(candidates) <= 1:
-        return (candidates[0] if candidates else None), [], "single_company_row"
+        single = candidates[0] if candidates else None
+        if single and title.strip() and single.get("title", "").strip():
+            if sheets_client.normalize_title(title) != sheets_client.normalize_title(single["title"]):
+                return None, [single], "title_conflict"
+        return single, [], "single_company_row"
     return None, candidates, ""
 
 
@@ -474,14 +488,20 @@ def _handle_message(msg, gmail, sheets, sheet_rows: list[dict], dry_run: bool) -
             logger.info("[DUP] application reply for '%s @ %s' already tracked, skipping.", title, company)
             return True
         logger.info("[NEW FROM REPLY] company=%s title=%r status=%s -> creating row.", company, title, status)
+        record = position_sheet.PositionRecord(
+            company=company, title=title, status=status, date_saved=msg.date_utc,
+            notes=sheets_client.append_status_history(triage.get("notes", ""), status, msg.date_utc),
+            job_id=jid, contact_name=triage.get("contact_name", ""),
+        )
         row_number = -1
         if not dry_run:
-            row_number = position_sheet.append_position(sheets, position_sheet.PositionRecord(
-                company=company, title=title, status=status, date_saved=msg.date_utc,
-                notes=sheets_client.append_status_history(triage.get("notes", ""), status, msg.date_utc),
-                job_id=jid, contact_name=triage.get("contact_name", ""),
-            ))
-        sheet_rows.append({**dict.fromkeys(config.SHEET_COLUMNS, ""), "company": company, "job_id": jid, "status": status, "_row": row_number})
+            row_number = position_sheet.append_position(sheets, record)
+        # Real incident: this used to stub in a blank title here, so a second,
+        # genuinely distinct reply for the same company later in the same run (two
+        # same-day Mercor rejections, "Excel Expert - Finance" vs "- General") saw a
+        # title-less row in memory and silently merged into it via the
+        # single-company-row fallback in _resolve_reply_target_row.
+        sheet_rows.append({**record.to_sheet_fields(), "_row": row_number})
         return False
 
     looks_like_unresolved_digest = category != "job_opportunity" or (
@@ -555,23 +575,21 @@ def _handle_message(msg, gmail, sheets, sheet_rows: list[dict], dry_run: bool) -
             "adding placeholder row instead of dropping it.",
             title, company,
         )
+        record = position_sheet.PositionRecord(
+            company=company, title=title, status=config.STATUS_NOT_APPLIED_YET, date_saved=msg.date_utc,
+            location=location,
+            notes=sheets_client.append_status_history(
+                sheets_client.format_attempt_note(
+                    "Could not verify a real posting description at ingestion time.", 1, config.MAX_RESOLUTION_ATTEMPTS
+                ),
+                config.STATUS_NOT_APPLIED_YET, msg.date_utc,
+            ),
+            job_id=jid, contact_name=triage.get("contact_name", ""),
+        )
         row_number = -1
         if not dry_run:
-            row_number = position_sheet.append_position(sheets, position_sheet.PositionRecord(
-                company=company, title=title, status=config.STATUS_NOT_APPLIED_YET, date_saved=msg.date_utc,
-                location=location,
-                notes=sheets_client.append_status_history(
-                    sheets_client.format_attempt_note(
-                        "Could not verify a real posting description at ingestion time.", 1, config.MAX_RESOLUTION_ATTEMPTS
-                    ),
-                    config.STATUS_NOT_APPLIED_YET, msg.date_utc,
-                ),
-                job_id=jid, contact_name=triage.get("contact_name", ""),
-            ))
-        sheet_rows.append({
-            **dict.fromkeys(config.SHEET_COLUMNS, ""), "company": company, "job_id": jid,
-            "status": config.STATUS_NOT_APPLIED_YET, "_row": row_number,
-        })
+            row_number = position_sheet.append_position(sheets, record)
+        sheet_rows.append({**record.to_sheet_fields(), "_row": row_number})
         return False
     if resolved.company != company:
         logger.info("[COMPANY CONFIRMED] '%s' -> '%s' for '%s'", company, resolved.company, title)
@@ -592,19 +610,17 @@ def _handle_message(msg, gmail, sheets, sheet_rows: list[dict], dry_run: bool) -
         return True
 
     logger.info("[NEW MATCH] '%s @ %s' score=%s -> appending row + notifying.", title, company, score)
+    record = position_sheet.PositionRecord(
+        company=company, title=title, status=config.STATUS_NOT_APPLIED_YET, date_saved=msg.date_utc,
+        url=resolved.url, location=location, description=resolved.description,
+        notes=sheets_client.append_status_history(score_result.get("summary", ""), config.STATUS_NOT_APPLIED_YET, msg.date_utc),
+        job_id=jid, contact_name=triage.get("contact_name", ""), fit_score=score,
+    )
     row_number = -1
     if not dry_run:
-        row_number = position_sheet.append_position(sheets, position_sheet.PositionRecord(
-            company=company, title=title, status=config.STATUS_NOT_APPLIED_YET, date_saved=msg.date_utc,
-            url=resolved.url, location=location, description=resolved.description,
-            notes=sheets_client.append_status_history(score_result.get("summary", ""), config.STATUS_NOT_APPLIED_YET, msg.date_utc),
-            job_id=jid, contact_name=triage.get("contact_name", ""), fit_score=score,
-        ))
+        row_number = position_sheet.append_position(sheets, record)
         notifier.notify_new_match(company, title, score)
-    sheet_rows.append({
-        **dict.fromkeys(config.SHEET_COLUMNS, ""), "company": company, "job_id": jid,
-        "status": config.STATUS_NOT_APPLIED_YET, "_row": row_number,
-    })
+    sheet_rows.append({**record.to_sheet_fields(), "_row": row_number})
     return False
 
 
