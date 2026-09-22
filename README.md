@@ -243,13 +243,28 @@ happy-path case, e.g.:
 | `test_sheets_client.py` | Company/title normalization, dedup lookups (job_id, title-disambiguation, exact-description), status predicates, the attempt counter, status-history formatting |
 | `test_classifier.py` | Workmode-suffix stripping, junior/intern and location filters, LinkedIn digest parsing (including the "application confirmation" body-shape edge case) |
 | `test_job_page_fetcher.py` | Closed-posting detection, script/style HTML stripping, the exact-phrase snippet match (and its single-word false-positive guard) |
-| `test_main.py` | `job_id_for`'s key-priority rules, `next_status` transitions, the ambiguous-vs-unambiguous row-matching tiers |
+| `test_main.py` | `job_id_for`'s key-priority rules, `next_status` transitions |
+| `test_guardrails.py` | Identity-completeness checks, LLM-plausibility checks, and the reply-target row-matching tiers (single row, conflicting title, ambiguous multiple) -- every write path's "is this safe, and is it the right row?" logic |
+| `test_validate_sheet.py` | The post-run audit correctly skips already-terminal (closed/nr) rows instead of re-flagging them forever |
 | `test_cv_matcher.py` | The code-enforced hard-requirement score cap |
 | `test_company_directory.py` | CSV read/write, and — the highest-value case — that a failed search is genuinely never retried more than once |
 
 `pytest.ini` redirects pytest's temp directory to a local `.pytest_tmp/` — this
 machine's default `%TEMP%` had a permissions issue that broke `tmp_path`
 fixtures otherwise.
+
+### CI
+
+[![Tests](../../actions/workflows/tests.yml/badge.svg)](../../actions/workflows/tests.yml)
+
+Two layers, since a server-side check alone can't stop a direct push to `master`:
+
+1. **GitHub Actions** ([.github/workflows/tests.yml](.github/workflows/tests.yml)) runs the full suite on every push and PR, from any machine/clone. Server-side, so it only reports failure *after* a push already landed.
+2. **A local pre-push git hook** ([.githooks/pre-push](.githooks/pre-push)) runs the same suite and rejects the push outright if anything fails, before it ever reaches GitHub. Not enabled by default -- opt in once per clone:
+   ```bash
+   git config core.hooksPath .githooks
+   ```
+   Skip deliberately with `git push --no-verify` if you ever need to (e.g. pushing a WIP branch); this shouldn't become a habit.
 
 ## Setup
 

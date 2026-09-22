@@ -1,0 +1,21 @@
+#!/bin/sh
+# Blocks `git push` if the test suite fails. Runs locally, before anything leaves
+# this machine -- the GitHub Actions workflow (.github/workflows/tests.yml) is the
+# server-side backstop for pushes from a clone that hasn't enabled this hook, but
+# only this can actually stop a direct push to master before it happens.
+#
+# Enable once per clone:
+#   git config core.hooksPath .githooks
+
+echo "[pre-push] Running test suite before push..."
+python -m pytest tests/ -q
+status=$?
+
+if [ $status -ne 0 ]; then
+    echo "[pre-push] Tests failed (exit $status) -- push rejected. Fix the failure or:"
+    echo "[pre-push]   git push --no-verify   (skip this hook -- use deliberately, not as a habit)"
+    exit 1
+fi
+
+echo "[pre-push] All tests passed -- proceeding with push."
+exit 0

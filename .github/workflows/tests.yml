@@ -1,0 +1,26 @@
+name: Tests
+
+# Runs the full pytest suite on every push and pull request. This is the
+# server-side check: it can't stop a direct push to master before it happens
+# (see .githooks/pre-push for that), but it catches anything pushed from a
+# machine that doesn't have the local hook installed, and gives every push a
+# visible pass/fail status on GitHub.
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run tests
+        run: python -m pytest tests/ -v
