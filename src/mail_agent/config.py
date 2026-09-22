@@ -166,5 +166,12 @@ OLLAMA_HOST = "http://localhost:11434"
 OLLAMA_MODEL = "qwen2.5:7b"
 OLLAMA_MODEL_CV_PARSE = "qwen2.5:7b"
 OLLAMA_KEEP_ALIVE = "30m"
-OLLAMA_TIMEOUT_SECONDS = 300
-OLLAMA_CV_PARSE_TIMEOUT_SECONDS = 600
+# Real incident (2026-09-22): another long-running task on this machine held the GPU
+# for hours, so this agent's calls sat queued behind it in Ollama's single-GPU serial
+# queue -- not stuck, just waiting their turn. With no runaway-generation risk left
+# (see llm_client.py's num_predict cap), the only thing a call can still legitimately
+# wait on is queue position, so the timeout is sized to tolerate that rather than
+# abort a call that would have succeeded a few minutes later. 300s repeatedly hit "3
+# consecutive failures" and aborted the whole run early during that window.
+OLLAMA_TIMEOUT_SECONDS = 1200
+OLLAMA_CV_PARSE_TIMEOUT_SECONDS = 1500

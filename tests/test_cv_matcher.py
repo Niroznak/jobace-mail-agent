@@ -63,7 +63,7 @@ class TestScoreJobEmailSanityGate:
     def test_does_not_skip_real_posting_content(self, monkeypatch):
         called = {}
 
-        def _fake_call_json(prompt):
+        def _fake_call_json(prompt, **kwargs):
             called["yes"] = True
             return {"score": 80, "hard_requirement_gaps": [], "summary": "Good fit."}
 

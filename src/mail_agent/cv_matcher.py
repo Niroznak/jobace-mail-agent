@@ -102,6 +102,7 @@ def ensure_profile() -> dict:
         _PARSE_PROMPT + cv_text,
         timeout=config.OLLAMA_CV_PARSE_TIMEOUT_SECONDS,
         model=config.OLLAMA_MODEL_CV_PARSE,
+        num_predict=2000,  # full structured profile -- genuinely needs more room than a triage/score response
     )
 
     with open(config.CV_PROFILE_CACHE_PATH, "w", encoding="utf-8") as f:
@@ -135,7 +136,7 @@ def score_job_email(company: str, title: str, content: str) -> dict:
         title=title,
         content=content[:config.DESCRIPTION_SCORE_CHARS],
     )
-    result = llm_client.call_json(prompt)  # raises on failure; caller decides retry behavior
+    result = llm_client.call_json(prompt, num_predict=600)  # raises on failure; caller decides retry behavior
     return _apply_hard_requirement_cap(result)
 
 

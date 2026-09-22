@@ -23,14 +23,29 @@ logger = logging.getLogger(__name__)
 _MAX_ATTEMPTS = 2
 _RETRY_DELAY_SECONDS = 3
 
+# Real incident: under format="json", the model can get stuck trying to satisfy the
+# JSON grammar (e.g. an unterminated string) instead of cleanly finishing -- with no
+# num_predict cap, that decodes all the way out to num_ctx before stopping, which at
+# this GPU's real tokens/sec turned a call that should take a few seconds into a
+# multi-minute stall well past OLLAMA_TIMEOUT_SECONDS. Every call site gets an
+# explicit cap sized to its expected output; none of this pipeline's JSON responses
+# legitimately need more than a few hundred tokens except the CV profile parse.
+_DEFAULT_NUM_PREDICT = 400
 
-def call_json(prompt: str, timeout: int | None = None, model: str | None = None) -> dict:
+
+def call_json(
+    prompt: str, timeout: int | None = None, model: str | None = None, num_predict: int | None = None
+) -> dict:
     payload = {
         "model": model or config.OLLAMA_MODEL,
         "messages": [{"role": "user", "content": prompt}],
         "stream": False,
         "format": "json",
-        "options": {"temperature": 0.1, "num_ctx": 4096},
+        "options": {
+            "temperature": 0.1,
+            "num_ctx": 4096,
+            "num_predict": num_predict or _DEFAULT_NUM_PREDICT,
+        },
         "keep_alive": config.OLLAMA_KEEP_ALIVE,
     }
     data = json.dumps(payload).encode("utf-8")

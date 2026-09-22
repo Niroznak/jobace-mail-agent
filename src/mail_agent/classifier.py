@@ -152,7 +152,7 @@ def parse_generic_digest(subject: str, body: str) -> list[dict]:
     replacement for the single-opportunity triage prompt)."""
     prompt = _GENERIC_DIGEST_PROMPT.format(subject=subject, body=(body or "")[:4000])
     try:
-        result = llm_client.call_json(prompt)
+        result = llm_client.call_json(prompt, num_predict=1000)  # a digest can list several postings
     except Exception:
         logger.exception("Generic digest parsing failed")
         return []
