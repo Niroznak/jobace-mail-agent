@@ -33,6 +33,19 @@ def save_grayed_job_ids(job_ids: set[str]) -> None:
         json.dump(sorted(job_ids), f, indent=2)
 
 
+def load_pending_verification() -> dict[str, int]:
+    """job_id -> attempt count, for stage 3's give-up-and-drop retry tracking."""
+    if os.path.exists(config.PENDING_VERIFICATION_PATH):
+        with open(config.PENDING_VERIFICATION_PATH, "r", encoding="utf-8") as f:
+            return json.load(f)
+    return {}
+
+
+def save_pending_verification(pending: dict[str, int]) -> None:
+    with open(config.PENDING_VERIFICATION_PATH, "w", encoding="utf-8") as f:
+        json.dump(pending, f, indent=2)
+
+
 def load_seen_career_postings() -> dict[str, list[str]]:
     if os.path.exists(config.SEEN_CAREER_POSTINGS_PATH):
         with open(config.SEEN_CAREER_POSTINGS_PATH, "r", encoding="utf-8") as f:

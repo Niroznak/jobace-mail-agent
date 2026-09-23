@@ -73,6 +73,13 @@ LAST_RUN_PATH = os.path.join(DATA_DIR, "last_run.json")
 SKIPPED_CANDIDATES_PATH = os.path.join(DATA_DIR, "skipped_candidates.csv")
 GRAYED_JOB_IDS_PATH = os.path.join(DATA_DIR, "grayed_job_ids.json")
 SEEN_CAREER_POSTINGS_PATH = os.path.join(DATA_DIR, "seen_career_postings.json")
+# Retry-attempt tracking for stage 3 (verify) on a freshly-discovered opportunity
+# that couldn't be verified yet -- distinct from a reply-derived row's in-sheet
+# "(attempt N/M)" notes convention. A speculative discovery that never gets
+# confirmed real after MAX_RESOLUTION_ATTEMPTS is dropped entirely (never written)
+# rather than left as a dead "nr" placeholder row -- unlike a reply, which always
+# represents a real event that happened even if we can't find the link.
+PENDING_VERIFICATION_PATH = os.path.join(DATA_DIR, "pending_verification.json")
 
 # Written by main.py when it stops early (3 consecutive Ollama failures) instead of
 # fully draining the new-message queue; removed once a run completes cleanly.
@@ -101,6 +108,14 @@ GOOGLE_SEARCH_CX = os.environ.get("GOOGLE_SEARCH_CX", "")
 # retried forever -- avoids indefinitely re-hitting a company career page that
 # genuinely doesn't have the position, or a link that turned out unusable.
 MAX_RESOLUTION_ATTEMPTS = 3
+
+# A tracked position still sitting at "not applied yet" (or blank) this long after
+# being saved is deprioritized automatically -- marked "nr", not "closed": this is
+# a judgment call about priority (you didn't act on it), not confirmation the
+# posting itself is actually gone, so it should still block a resurfaced duplicate
+# the way any other manually-reviewed "nr" decision does. Checked in
+# review_closed_positions.py, which runs before every mail scan.
+STALE_NOT_APPLIED_DAYS = 21
 
 # --- Thresholds ---
 FIT_SCORE_THRESHOLD = 65

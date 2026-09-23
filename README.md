@@ -45,19 +45,47 @@ to run alone:
 
 ```
 scripts/review_closed_positions.py  →  scripts/main.py  →  scripts/validate_sheet.py
-        (gray out stale rows)             (scan mail)          (audit for gaps)
+   stage 1: gray out stale rows      stages 2-5: scan mail    stage 6: audit for gaps
 ```
 
 1. **`review_closed_positions.py`** — re-checks every tracked, still-open row's
    link. If the posting now shows a "no longer accepting applications" banner (or,
    for a company-listings-page link, the title has simply dropped off the current
    listings), the row's status is set to `closed` and its text grayed out — never
-   deleted. Runs *first* in the schedule so `main.py`'s dedup always works against
-   a freshly-cleaned active set.
-2. **`main.py`** — the core mail scan. Fetches unread/new mail from the Gmail
-   `Work` label, classifies each message, dedups against tracked rows, scores CV
-   fit via Ollama, and appends new rows (via `position_sheet.append_position`) or
-   updates existing ones.
+   deleted. Also auto-deprioritizes (`status → nr`) any row that's sat at a
+   pre-application status for `config.STALE_NOT_APPLIED_DAYS` (21) or more —
+   a priority judgment call, not confirmation the posting is gone, so it uses `nr`
+   (keeps blocking a resurfaced duplicate) rather than `closed` (would treat a
+   resurfaced duplicate as new). Rows already in
+   `interview`/`offer`/`applied`/`rejected` are never touched by either check
+   (`sheets_client.is_eligible_for_closure` only considers a row still
+   `""`/`"not applied yet"`) -- a posting going dead or stale doesn't erase real
+   pipeline history. Runs **first**, before any mail is even fetched, so stage 2's
+   dedup always works against a freshly-cleaned active set and a stale posting is
+   never mistaken for a live one.
+2. **`main.py`** — orchestrates stages 2-5, each a separately-tested module in
+   `src/mail_agent/pipeline/` with its own typed input/output, so a bug is always
+   attributable to exactly one stage:
+   - **extract** (`pipeline/extract.py`) — turns one fetched email into a list of
+     `Candidate`s: either a new-opportunity candidate or a reply/status-update
+     candidate. Purely structural (LinkedIn digest splitting, one `classify_email`
+     LLM triage call) -- no fetching, filtering, or writing yet.
+   - **verify** (`pipeline/verify.py`) — for opportunity candidates only: the four
+     early-reject filters (platform sender, generic listing label, junior title,
+     excluded location), dedup against tracked rows, then a real fetched
+     description via `position_resolver`/`job_page_fetcher`. A candidate that
+     still can't be verified after `MAX_RESOLUTION_ATTEMPTS` retries (persisted in
+     `data/pending_verification.json`, since the triggering email is marked read
+     either way and Gmail won't re-serve it) is **dropped entirely** -- never
+     written, not even as a placeholder.
+   - **score** (`pipeline/score.py`) — `cv_matcher.score_job_email` against the
+     verified description; below `FIT_SCORE_THRESHOLD` is logged to
+     `skipped_candidates.csv` and goes no further.
+   - **reconcile** (`pipeline/reconcile.py`) — decides insert vs. update vs.
+     ambiguous vs. dropped and writes it, for *every* candidate regardless of
+     source (digest, generic digest, single email) through the same functions --
+     the fix for 5 former near-duplicate write sites each getting some detail
+     slightly wrong.
 3. **`validate_sheet.py`** — post-run audit: flags (never edits) any row still
    missing company/title, or an active row stuck with no url/description past
    `MAX_RESOLUTION_ATTEMPTS`, so gaps surface in one summary notification instead
@@ -86,8 +114,11 @@ also commented out of `run_mail_agent.bat` pending a fix to that matching logic.
 | `company_directory.py` | Self-healing `tracked_companies.csv` — checks the CSV before ever searching, verifies a cached link is still live, and remembers a failed search so it's never silently retried every run. |
 | `position_resolver.py` | Ties the above together: given a company/title (and optionally an email body), makes a real effort to find a verified link + description + confirmed company name. Never fabricates — returns blank fields if nothing checks out. Career-site search is currently disabled (`config.ENABLE_CAREER_SITE_SEARCH`). |
 | `notifier.py` | Windows toast notifications — new matches, and anything that needs manual attention. |
-| `state.py` | Local JSON/CSV state: processed-message dedup, and a recoverable log of scored-but-rejected candidates. |
-| `main.py` | Orchestrates the mail-scan pipeline: triage → dedup → resolve → score → write. |
+| `state.py` | Local JSON/CSV state: processed-message dedup, pending-verification retries, and a recoverable log of scored-but-rejected candidates. |
+| `pipeline/types.py` | The typed contracts between stages: `Candidate`, `VerifiedPosition`, `ScoredItem`, `ReconcileResult`. |
+| `pipeline/dedup.py` | `job_id_for` (multi-tier dedup key) and `next_status` (status-transition rules) -- shared by `verify.py`/`reconcile.py`, re-exported from `main.py` for backward compatibility. |
+| `pipeline/extract.py`, `verify.py`, `score.py`, `reconcile.py` | Stages 2-5 (see above). |
+| `main.py` | Thin orchestrator: fetch mail, run every candidate through extract → verify → score → reconcile, handle per-message read-marking and the 3-consecutive-failure circuit breaker. |
 | `review_closed_positions.py`, `validate_sheet.py` | The other two active pipeline scripts (see above). |
 | `backfill_career_links.py`, `scan_career_pages.py` | Career-site search scripts, currently disabled/unwired pending a matching-accuracy fix (see above). |
 | `morning_flag.py` | Dedup flag so the "morning" scheduled task only actually runs once per day even if Task Scheduler's sleep-catchup and a normal firing both land the same morning. |
@@ -96,16 +127,21 @@ also commented out of `run_mail_agent.bat` pending a fix to that matching logic.
 
 ```
 Gmail (Work label)
-  → gmail_client.fetch_recent()        real received date, not run date
-  → classifier.parse_linkedin_digest() structural (regex) split, if digest-shaped
-      ├─ already-tracked job_id + subject names this posting's company?
-      │     → routed as a STATUS UPDATE, not a new opportunity (see below)
-      └─ else → classifier.classify_email()  (one Ollama call: category/company/title/...)
-  → dedup: job_id_for() → sheets_client.find_row_by_job_id / _and_title / _and_description
-  → position_resolver.resolve_position()   only path allowed to produce a description
-  → cv_matcher.score_job_email()           scored against the VERIFIED description only
-  → sheets_client.append_row() / update_row_fields()
-  → notifier.notify_new_match()
+  → gmail_client.fetch_recent()          real received date, not run date
+  → pipeline.extract.extract_candidates()
+      classifier.parse_linkedin_digest() structural (regex) split, if digest-shaped
+        ├─ already-tracked job_id + subject names this posting's company?
+        │     → Candidate(kind="reply")  -- a status update, not a new opportunity
+        └─ else → classifier.classify_email()  (one Ollama call) → Candidate(kind="opportunity" | "reply")
+  kind="reply" candidates skip straight to reconcile; kind="opportunity" continues:
+  → pipeline.verify.verify_position()
+      early filters → dedup (job_id_for + find_row_by_job_id/_and_title/_and_description)
+      → position_resolver.resolve_position()   only path allowed to produce a description
+      → VerifiedPosition, or None (retried via data/pending_verification.json, then dropped)
+  → pipeline.score.score_position()        cv_matcher scores the VERIFIED description only
+  → pipeline.reconcile.reconcile()         insert / update / ambiguous / dropped
+      → position_sheet.append_position() / sheets_client.update_row_fields()
+      → notifier.notify_new_match() / notify_needs_review()
 ```
 
 ## Design decisions and the bugs behind them
@@ -381,7 +417,8 @@ disable location filtering entirely.
 | `MAIL_LOOKBACK_DAYS` | How far back each run's Gmail query looks |
 | `FIT_SCORE_THRESHOLD` | Minimum CV-fit score to surface a job |
 | `HARD_REQUIREMENT_SCORE_CAP` | Score ceiling when a hard, unmet requirement is found |
-| `MAX_RESOLUTION_ATTEMPTS` | Backfill retries before giving up (marks `nr`) |
+| `MAX_RESOLUTION_ATTEMPTS` | Retries before giving up on an unresolvable position (dropped entirely for a fresh discovery; marks `nr` for a reply-derived row) |
+| `STALE_NOT_APPLIED_DAYS` | Days at a pre-application status before `review_closed_positions.py` auto-marks a row `nr` |
 | `CV_TEXT_PATH` | Path to your plain-text CV |
 | `OLLAMA_HOST` / `OLLAMA_MODEL` | Local LLM used for classification/scoring |
 | `TRACKED_COMPANIES_CSV` | Self-healing company → career-page directory |

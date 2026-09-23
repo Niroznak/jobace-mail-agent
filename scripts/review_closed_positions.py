@@ -13,7 +13,7 @@ import logging
 import os
 import sys
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "src"))
 
@@ -45,6 +45,22 @@ def setup_logging() -> None:
 
 def _is_career_directory_link(url: str, directory_rows: list[dict]) -> bool:
     return any(row.get("Link", "").strip() == url for row in directory_rows)
+
+
+def _is_stale_not_applied(row: dict, today: datetime) -> bool:
+    """True if this row has sat at a pre-application status for
+    config.STALE_NOT_APPLIED_DAYS or longer -- a priority judgment call (see
+    config.py), independent of whether the link itself still resolves."""
+    if not sheets_client.is_eligible_for_closure(row):
+        return False
+    date_saved = (row.get("date_saved") or "").strip()
+    if not date_saved:
+        return False
+    try:
+        saved = datetime.strptime(date_saved, "%Y-%m-%d")
+    except ValueError:
+        return False
+    return (today - saved) >= timedelta(days=config.STALE_NOT_APPLIED_DAYS)
 
 
 def _check_row(row: dict, directory_rows: list[dict]) -> bool | None:
@@ -96,9 +112,35 @@ def run(dry_run: bool = False) -> None:
     if not dry_run and nr_rows:
         state.save_grayed_job_ids(grayed_job_ids)
 
+    today = datetime.now()
+    stale_rows = [r for r in rows if _is_stale_not_applied(r, today)]
+    if stale_rows:
+        logger.info("Deprioritizing %d row(s) stale %d+ days with no application%s.",
+                     len(stale_rows), config.STALE_NOT_APPLIED_DAYS, " (dry-run)" if dry_run else "")
+    for row in stale_rows:
+        row_number, title, company = row["_row"], row.get("title", ""), row.get("company", "")
+        logger.info("[STALE] row %s '%s @ %s' -> saved %s, no application in %d+ days, marked nr.",
+                     row_number, title, company, row.get("date_saved", ""), config.STALE_NOT_APPLIED_DAYS)
+        if not dry_run:
+            notes = sheets_client.append_status_history(
+                row.get("notes", ""), "nr", today.strftime("%Y-%m-%d"),
+            )
+            sheets_client.update_row_fields(sheets, row_number, {
+                "status": "nr",
+                "notes": f"[AUTO] No application after {config.STALE_NOT_APPLIED_DAYS}+ days. {notes}".strip(),
+            })
+            sheets_client.set_row_text_color(sheets, row_number, _CLOSED_ROW_COLOR)
+            job_id = row.get("job_id", "")
+            if job_id:
+                grayed_job_ids.add(job_id)
+    if not dry_run and stale_rows:
+        state.save_grayed_job_ids(grayed_job_ids)
+    stale_row_numbers = {r["_row"] for r in stale_rows}
+
     candidates = [
         r for r in rows
         if sheets_client.is_eligible_for_closure(r) and r.get("url", "").strip()
+        and r["_row"] not in stale_row_numbers
     ]
     logger.info("Reviewing %d open row(s) with a link%s.", len(candidates), " (dry-run)" if dry_run else "")
 
