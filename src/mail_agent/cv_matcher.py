@@ -5,6 +5,7 @@ import hashlib
 import json
 import logging
 import os
+import re
 
 from . import job_page_fetcher
 from . import llm_client
@@ -48,6 +49,18 @@ in a programming language like C++, Python, or Java" is satisfied by knowing any
 without Java specifically. Only list a skill in hard_requirement_gaps when it is stated as the sole
 required option with no listed alternative the candidate meets (e.g. "must have Java", "strong Java
 expertise required", "5+ years of Java required").
+
+Score ONLY against this specific role's own stated responsibilities and requirements section --
+never against generic "About the company" / mission-statement / marketing text elsewhere on the
+page. A company that builds AI or software products can still post an unrelated non-technical role
+(logistics, HR, sales, quality/supply-chain operations, finance) -- the fact that the surrounding
+page is full of the company's own AI/software buzzwords is not evidence that THIS role involves any
+of it (real case: an AI/software company's page describing itself as an "AI-powered" business
+scored 83/100 for a "Dealer Part Return Repair/Reuse Management" role whose actual listed duties
+were entirely supply-chain/quality-control -- zero software or AI content -- because the company
+boilerplate around it was saturated with AI/data-analytics language having nothing to do with this
+specific job's responsibilities). If the role's own responsibilities don't involve the candidate's
+core skills, score low regardless of how much unrelated company-level buzzword text surrounds it.
 
 CANDIDATE PROFILE:
 {cv_profile}
@@ -118,6 +131,36 @@ _NOT_A_POSTING_RESULT = {
                "against text that likely isn't a job description at all.",
 }
 
+# Real incident: a posting stating "US Citizens only" plainly, well within the
+# scored content window, still got scored 72/100 by the LLM -- it simply didn't
+# weight an explicit, unambiguous eligibility restriction as disqualifying. Unlike
+# a skill gap (still a matter of degree, correctly left to the LLM + the hard-
+# requirement cap below), citizenship/work-authorization is binary and detectable
+# by pattern alone: enforced here in code, the same reasoning already applied to
+# _apply_hard_requirement_cap -- never trust the model's own arithmetic/weighting
+# on a deterministic disqualifier when a reliable pattern exists.
+_CITIZENSHIP_RESTRICTION_RE = re.compile(
+    r"\b(u\.?s\.?a?|united states)\s+citizens?\s+only\b"
+    r"|\bmust\s+be\s+(a\s+)?(u\.?s\.?a?|united states)\s+citizen\b"
+    r"|\b(u\.?s\.?a?|united states)\s+citizenship\s+(is\s+)?required\b"
+    r"|\bno\s+(visa\s+)?sponsorship\b"
+    r"|\bunable\s+to\s+sponsor\b"
+    r"|\bwill\s+not\s+sponsor\b"
+    r"|\bsecurity\s+clearance\b[^.]{0,80}\bcitizen",
+    re.IGNORECASE,
+)
+_CITIZENSHIP_INELIGIBLE_RESULT = {
+    "score": 0, "strengths": [], "must_have_gaps": ["US citizenship / work authorization"],
+    "hard_requirement_gaps": ["US citizenship / work authorization"],
+    "summary": "Posting restricts to US citizens / requires US work authorization with no sponsorship -- an "
+               "absolute eligibility blocker regardless of skill fit, so score is forced to 0 in code rather "
+               "than left to the LLM's own judgment.",
+}
+
+
+def _has_citizenship_restriction(content: str) -> bool:
+    return bool(_CITIZENSHIP_RESTRICTION_RE.search(content or ""))
+
 
 def score_job_email(company: str, title: str, content: str) -> dict:
     # Pre-scoring sanity gate, no LLM call: catches content that was fetched
@@ -128,6 +171,10 @@ def score_job_email(company: str, title: str, content: str) -> dict:
     if not job_page_fetcher.looks_like_job_posting(content):
         logger.info("[NOT A POSTING] '%s @ %s' -> content has no job-posting signal words, skipping LLM scoring.", title, company)
         return dict(_NOT_A_POSTING_RESULT)
+
+    if _has_citizenship_restriction(content):
+        logger.info("[INELIGIBLE] '%s @ %s' -> citizenship/work-authorization restriction, score forced to 0.", title, company)
+        return dict(_CITIZENSHIP_INELIGIBLE_RESULT)
 
     profile = ensure_profile()
     prompt = _SCORE_PROMPT.format(

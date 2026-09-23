@@ -77,3 +77,45 @@ class TestScoreJobEmailSanityGate:
         result = cv_matcher.score_job_email("Acme", "Senior Engineer", real_content)
         assert called.get("yes") is True
         assert result["score"] == 80
+
+
+class TestCitizenshipRestrictionGate:
+    """Real incident: a posting stating "US Citizens only" plainly, well within the
+    scored content window, still got scored 72/100 by the LLM -- an explicit,
+    unambiguous eligibility restriction the model simply didn't weight as
+    disqualifying. Enforced in code instead, the same reasoning as the hard-
+    requirement cap: never trust the model's own judgment on a deterministic
+    disqualifier. Verifies the gate short-circuits BEFORE any Ollama call."""
+
+    def _forbid_llm_call(self, monkeypatch):
+        def _raise(*args, **kwargs):
+            raise AssertionError("llm_client.call_json should never be reached for a citizenship-restricted posting")
+        monkeypatch.setattr(llm_client, "call_json", _raise)
+
+    def _real_posting(self, restriction_line: str) -> str:
+        return (
+            "About the role: we are looking for a Senior Engineer.\n"
+            "Requirements:\n- 5+ years Python\n- Strong communication skills\n"
+            f"{restriction_line}\n"
+            "Responsibilities:\n- Build things\n- Ship things"
+        )
+
+    def test_forces_score_zero_for_us_citizens_only(self, monkeypatch):
+        self._forbid_llm_call(monkeypatch)
+        result = cv_matcher.score_job_email("Acme", "Senior Engineer", self._real_posting("US Citizens only"))
+        assert result["score"] == 0
+        assert result["hard_requirement_gaps"] == ["US citizenship / work authorization"]
+
+    def test_forces_score_zero_for_no_sponsorship(self, monkeypatch):
+        self._forbid_llm_call(monkeypatch)
+        result = cv_matcher.score_job_email("Acme", "Senior Engineer", self._real_posting("No visa sponsorship available."))
+        assert result["score"] == 0
+
+    def test_does_not_flag_a_posting_with_no_restriction(self, monkeypatch):
+        def _fake_call_json(prompt, **kwargs):
+            return {"score": 80, "hard_requirement_gaps": [], "summary": "Good fit."}
+
+        monkeypatch.setattr(llm_client, "call_json", _fake_call_json)
+        monkeypatch.setattr(cv_matcher, "ensure_profile", lambda: {"skills": []})
+        result = cv_matcher.score_job_email("Acme", "Senior Engineer", self._real_posting("Remote work available."))
+        assert result["score"] == 80
