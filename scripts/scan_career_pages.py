@@ -25,6 +25,7 @@ from mail_agent import classifier
 from mail_agent import company_directory
 from mail_agent import config
 from mail_agent import cv_matcher
+from mail_agent import guardrails
 from mail_agent import job_page_fetcher
 import main
 from mail_agent import notifier
@@ -101,6 +102,15 @@ def run(dry_run: bool = False) -> None:
         seen.setdefault(company, [])
         for title, url in new_links:
             seen[company].append(url)  # mark seen regardless of outcome -- never re-considered
+
+            # Real incident: a career page's own nav link to its /jobs listing page
+            # ("Open Positions") passed extract_job_links' denylist, passed the
+            # scoring sanity gate, got scored 83/100 (the listing page's aggregate
+            # text of many real postings looks job-shaped), and was written to the
+            # sheet as a specific role. This is the exact site that produced it.
+            if guardrails.looks_like_generic_listing_title(title):
+                logger.info("[SKIP] '%s @ %s' -> generic listing label, not a specific position.", title, company)
+                continue
 
             if classifier.is_junior_or_intern_title(title):
                 logger.info("[SKIP] '%s @ %s' -> junior/intern/student title, not relevant.", title, company)

@@ -1,7 +1,7 @@
 """Data-trust guardrails -- the single place that defines what counts as complete
 enough to write, or sane enough to believe, in this pipeline. Every write path
 (position_sheet.append_position, main.py's status-update handling) must pass
-through one of these checks before it's allowed to touch the sheet. Three
+through one of these checks before it's allowed to touch the sheet. Four
 checkpoints live here:
 
 1. Identity completeness (a sheet row must name a company and a title to be
@@ -20,8 +20,16 @@ checkpoints live here:
    touches a row, verifies there is exactly one row it could honestly be about --
    never guesses between multiple candidates or across a stated, conflicting title,
    both confirmed real failure modes (see the function's own docstring).
+4. Generic-listing title detection (looks_like_generic_listing_title): a present
+   but structurally meaningless title -- "Open Positions", "Careers" -- is not the
+   same failure as a blank one. A fixed denylist of exact phrases already existed
+   for this in job_page_fetcher.py and still missed a real case, because a denylist
+   of phrases is always missing the next variant; this checks the general shape of
+   a listing label instead.
 """
 from __future__ import annotations
+
+import re
 
 from . import sheets_client
 
@@ -49,6 +57,42 @@ def looks_like_hallucinated_triage(notes: str, status: str) -> bool:
     answer: either the status isn't one of the values the prompt actually offers, or
     "notes" (meant to be one short sentence) is implausibly long for that."""
     return len(notes or "") > MAX_TRIAGE_NOTES_CHARS or status not in VALID_TRIAGE_STATUSES
+
+
+# Checked word-by-word (every word must be either a generic qualifier or a jobs-
+# noun stem) rather than a rigid positional pattern -- "Open Positions", "View All
+# Positions", and "See Open Roles" all say the same thing with a different word
+# count/order, and a real position title always has at least one word that's
+# neither (a role name, seniority, function). Real incident: a career page's own
+# nav link to its /jobs listing page got scraped by scan_career_pages.py, passed
+# job_page_fetcher._NAV_NOISE_WORDS (which denylists "careers"/"all jobs" but not
+# this phrasing), passed the pre-scoring looks_like_job_posting gate (the listing
+# page's aggregate text of many real postings looks job-shaped to a keyword check),
+# got LLM-scored 83/100, and was written to the sheet as "Open Positions" @
+# Mobileye -- a specific-looking row for something that was never a specific
+# position at all.
+_GENERIC_QUALIFIER_WORDS = {"all", "current", "open", "available", "new", "browse", "view", "search", "explore", "see", "our"}
+_GENERIC_NOUN_STEMS = ("job", "position", "opening", "vacanc", "role", "career", "opportunit")
+
+
+def looks_like_generic_listing_title(title: str) -> bool:
+    """True if `title` is a generic "browse all jobs" label rather than the name of
+    one specific position -- e.g. "Open Positions", "Current Openings", "Careers",
+    "View All Positions". A real job title always has at least one word that isn't
+    a generic qualifier or jobs-noun stem, even when short ("QA Engineer" doesn't
+    match)."""
+    words = re.findall(r"[a-zA-Z]+", (title or "").lower())
+    if not words:
+        return False
+    has_noun = False
+    for word in words:
+        if any(word.startswith(stem) for stem in _GENERIC_NOUN_STEMS):
+            has_noun = True
+            continue
+        if word in _GENERIC_QUALIFIER_WORDS:
+            continue
+        return False
+    return has_noun
 
 
 def resolve_reply_target_row(sheet_rows: list[dict], company: str, title: str) -> tuple[dict | None, list[dict], str]:

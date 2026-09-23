@@ -50,8 +50,26 @@ def append_position(service: Resource, record: PositionRecord) -> int:
     """Validates identity (company/title) before writing -- tags and notifies rather
     than dropping the row when incomplete, since a reply-derived row can be genuinely
     missing a title with no way to recover one. Returns the new row's 1-indexed
-    sheet row number."""
+    sheet row number, or -1 if the write was refused outright (see below) -- the
+    same sentinel already used for a dry-run's "not really written" row number, so
+    every caller's existing handling of that value already covers this case too.
+
+    A generic-listing title (see guardrails.looks_like_generic_listing_title) is
+    refused entirely rather than flagged like a missing field would be: unlike a
+    blank title, which might still represent a real opportunity we just couldn't
+    name, "Open Positions" carries zero information -- there is nothing for a human
+    to review, only a row to delete. Every known ingestion path already skips this
+    earlier (before ever reaching here, to avoid wasting a fetch/score call on it);
+    this is the last-resort backstop for any path that doesn't."""
     fields = record.to_sheet_fields()
+    if guardrails.looks_like_generic_listing_title(fields.get("title", "")):
+        logger.warning(
+            "[REFUSED] generic listing title, not a specific position -- company=%r title=%r "
+            "(this should have been skipped earlier; refusing to write it at all).",
+            fields.get("company", ""), fields.get("title", ""),
+        )
+        return -1
+
     missing = guardrails.missing_identity_fields(fields)
     if missing:
         fields = guardrails.tag_incomplete(fields, missing)

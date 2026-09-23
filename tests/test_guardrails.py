@@ -107,3 +107,38 @@ class TestResolveReplyTargetRow:
         row, ambiguous, tier = guardrails.resolve_reply_target_row([], "Unknown Co", "Some Role")
         assert row is None
         assert ambiguous == []
+
+
+class TestLooksLikeGenericListingTitle:
+    """Real incident: a career page's own nav link to its /jobs listing page
+    ("Open Positions") passed every earlier check (extract_job_links' denylist,
+    the pre-scoring sanity gate) and was written to the sheet as "Open Positions"
+    @ Mobileye, fit_score 83, as if it were one specific role."""
+
+    def test_flags_the_real_incident_title(self):
+        assert guardrails.looks_like_generic_listing_title("Open Positions")
+
+    def test_flags_common_variants_regardless_of_word_order_or_count(self):
+        for title in (
+            "Current Openings", "Job Openings", "Careers", "All Jobs", "Jobs",
+            "Positions", "Career Opportunities", "View All Positions",
+            "Browse Jobs", "See Open Roles", "Job Vacancies", "Available Roles",
+        ):
+            assert guardrails.looks_like_generic_listing_title(title), title
+
+    def test_does_not_flag_real_titles_even_when_they_contain_a_generic_word(self):
+        # A real title always has at least one word that isn't a generic qualifier
+        # or jobs-noun stem -- must never over-match on that basis alone.
+        for title in (
+            "QA Engineer", "Senior AI Software Engineer", "Data Scientist",
+            "Job Placement Specialist", "Position Manager - Talent Acquisition",
+            "Career Coach", "VP of Careers Development",
+            "Senior Recruiter - Careers Team",
+        ):
+            assert not guardrails.looks_like_generic_listing_title(title), title
+
+    def test_blank_title_is_not_flagged_here(self):
+        # Blank is guardrails.missing_identity_fields's job, a different failure
+        # mode (still possibly a real, unnamed opportunity) from a present-but-
+        # meaningless one.
+        assert not guardrails.looks_like_generic_listing_title("")

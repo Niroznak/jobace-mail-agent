@@ -166,6 +166,9 @@ def _handle_digest_posting(posting: dict, sheets, sheet_rows: list[dict], dry_ru
     title = posting["title"]
     if classifier.is_platform_company_name(company):
         return True
+    if guardrails.looks_like_generic_listing_title(title):
+        logger.info("[SKIP] '%s @ %s' -> generic listing label, not a specific position.", title, company)
+        return True
     if classifier.is_junior_or_intern_title(title):
         logger.info("[SKIP] '%s @ %s' -> junior/intern/student title, not relevant.", title, company)
         return True
@@ -266,6 +269,9 @@ def _handle_generic_digest_posting(posting: dict, sheets, sheet_rows: list[dict]
     never the only source. Returns True if nothing changed in the sheet."""
     company, title = posting["company"], posting["title"]
     if classifier.is_platform_company_name(company):
+        return True
+    if guardrails.looks_like_generic_listing_title(title):
+        logger.info("[SKIP] '%s @ %s' -> generic listing label, not a specific position.", title, company)
         return True
     if classifier.is_junior_or_intern_title(title):
         logger.info("[SKIP] '%s @ %s' -> junior/intern/student title, not relevant.", title, company)
@@ -507,6 +513,9 @@ def _handle_message(msg, gmail, sheets, sheet_rows: list[dict], dry_run: bool) -
     company = company or msg.sender_name or msg.sender_email
     title = triage.get("role_title") or msg.subject
     location = triage.get("location", "")
+    if guardrails.looks_like_generic_listing_title(title):
+        logger.info("[SKIP] '%s @ %s' -> generic listing label, not a specific position.", title, company)
+        return True
     if classifier.is_junior_or_intern_title(title):
         logger.info("[SKIP] '%s @ %s' -> junior/intern/student title, not relevant.", title, company)
         return True
