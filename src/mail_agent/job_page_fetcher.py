@@ -77,6 +77,15 @@ _JOB_POSTING_SIGNAL_WORDS = (
     "what you will do", "we are looking for", "we're looking for", "about the role",
     "about this role", "job description", "years of experience", "nice to have",
     "must have", "preferred qualifications", "the ideal candidate", "you will",
+    # Hebrew equivalents -- this pipeline handles real Israeli postings that are
+    # entirely in Hebrew (e.g. Rafael, SCD). The English-only list above
+    # unconditionally failed every one of them: a genuine posting (confirmed case:
+    # SCD's Hebrew "Data Engineer (JMP)" listing, manually re-scored after this gap
+    # was found) got scored 0 as "content doesn't look like a real job posting"
+    # despite containing clear "דרישות" (requirements) and "תחומי אחריות"
+    # (responsibilities) sections.
+    "דרישות", "תחומי אחריות", "כישורים", "התפקיד כולל", "שנות ניסיון",
+    "אנחנו מחפשים", "אנו מחפשים", "תיאור התפקיד", "דרוש/ה",
 )
 
 

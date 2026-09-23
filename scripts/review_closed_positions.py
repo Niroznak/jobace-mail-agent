@@ -47,6 +47,18 @@ def _is_career_directory_link(url: str, directory_rows: list[dict]) -> bool:
     return any(row.get("Link", "").strip() == url for row in directory_rows)
 
 
+def _grayed_key(row: dict) -> str:
+    """Stable-enough identity for "already grayed" tracking -- job_id when present,
+    else the row number itself. Real bug: several long-standing rows (created before
+    job_id was consistently populated, or added/edited by hand) have a blank
+    job_id -- keying purely on that meant they could never be remembered as
+    already-handled, so they got re-logged and re-grayed as "newly marked nr" on
+    every single run, forever. Row numbers are stable enough for this purpose since
+    this codebase never deletes rows (see README: "never delete, always nr")."""
+    job_id = (row.get("job_id") or "").strip()
+    return job_id if job_id else f"row:{row['_row']}"
+
+
 def _is_stale_not_applied(row: dict, today: datetime) -> bool:
     """True if this row has sat at a pre-application status for
     config.STALE_NOT_APPLIED_DAYS or longer -- a priority judgment call (see
@@ -98,7 +110,7 @@ def run(dry_run: bool = False) -> None:
     grayed_job_ids = state.load_grayed_job_ids()
     nr_rows = [
         r for r in rows
-        if sheets_client.is_row_not_relevant(r) and r.get("job_id", "") not in grayed_job_ids
+        if sheets_client.is_row_not_relevant(r) and _grayed_key(r) not in grayed_job_ids
     ]
     if nr_rows:
         logger.info("Graying %d newly-marked 'nr' row(s)%s.", len(nr_rows), " (dry-run)" if dry_run else "")
@@ -106,9 +118,7 @@ def run(dry_run: bool = False) -> None:
         logger.info("[NR] row %s '%s @ %s' -> grayed.", row["_row"], row.get("title", ""), row.get("company", ""))
         if not dry_run:
             sheets_client.set_row_text_color(sheets, row["_row"], _CLOSED_ROW_COLOR)
-            job_id = row.get("job_id", "")
-            if job_id:
-                grayed_job_ids.add(job_id)
+            grayed_job_ids.add(_grayed_key(row))
     if not dry_run and nr_rows:
         state.save_grayed_job_ids(grayed_job_ids)
 
@@ -130,9 +140,7 @@ def run(dry_run: bool = False) -> None:
                 "notes": f"[AUTO] No application after {config.STALE_NOT_APPLIED_DAYS}+ days. {notes}".strip(),
             })
             sheets_client.set_row_text_color(sheets, row_number, _CLOSED_ROW_COLOR)
-            job_id = row.get("job_id", "")
-            if job_id:
-                grayed_job_ids.add(job_id)
+            grayed_job_ids.add(_grayed_key(row))
     if not dry_run and stale_rows:
         state.save_grayed_job_ids(grayed_job_ids)
     stale_row_numbers = {r["_row"] for r in stale_rows}

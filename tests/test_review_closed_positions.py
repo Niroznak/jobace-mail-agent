@@ -43,3 +43,28 @@ class TestIsStaleNotApplied:
 
     def test_malformed_date_saved_is_safe(self):
         assert not rcp._is_stale_not_applied(_row("not-a-date"), TODAY)
+
+
+class TestGrayedKey:
+    """Real bug: several long-standing rows have a blank job_id (created before
+    job_id was consistently populated, or added/edited by hand). Keying "already
+    grayed" tracking purely on job_id meant these rows could never be remembered as
+    already-handled -- they got re-logged and re-grayed as "newly marked nr" on
+    every single run, forever, even though they were marked nr and grayed long ago."""
+
+    def test_uses_job_id_when_present(self):
+        row = {"_row": 42, "job_id": "abc123"}
+        assert rcp._grayed_key(row) == "abc123"
+
+    def test_falls_back_to_row_number_when_job_id_blank(self):
+        row = {"_row": 8, "job_id": ""}
+        assert rcp._grayed_key(row) == "row:8"
+
+    def test_falls_back_to_row_number_when_job_id_missing_entirely(self):
+        row = {"_row": 8}
+        assert rcp._grayed_key(row) == "row:8"
+
+    def test_two_rows_with_blank_job_id_get_distinct_keys(self):
+        # The exact real case: rows 7-12 all had job_id="" -- without the row-number
+        # fallback, they'd all collapse to the same "already grayed" identity.
+        assert rcp._grayed_key({"_row": 8, "job_id": ""}) != rcp._grayed_key({"_row": 9, "job_id": ""})

@@ -80,6 +80,14 @@ class TestLooksLikeJobPosting:
     def test_blank_text_fails(self):
         assert not jpf.looks_like_job_posting("")
 
+    def test_hebrew_posting_passes(self):
+        # Real bug: an entirely-Hebrew posting (SCD's real "Data Engineer (JMP)"
+        # listing -- דרישות = requirements, תחומי אחריות = responsibilities) failed
+        # every signal word in the English-only list and got scored 0 as "not a
+        # real job posting," despite being a genuine, detailed listing.
+        text = "תיאור התפקיד\nתחומי אחריות עיקריים\n• ניתוח נתונים\nדרישות\n• תואר ראשון בסטטיסטיקה"
+        assert jpf.looks_like_job_posting(text)
+
 
 class TestExtractJobLinks:
     _SAMPLE_HTML = """
