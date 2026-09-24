@@ -52,10 +52,28 @@ class TestScoreIntegration:
         assert r["score"] == config.HARD_REQUIREMENT_SCORE_CAP < config.FIT_SCORE_THRESHOLD
 
     def test_degree_gap_keeps_score(self, monkeypatch, tmp_path):
-        r = self._score(monkeypatch, tmp_path, [_req("MSc", "degree", any_of=["MSc"])])
-        assert r["score"] == 73
+        r = self._score(monkeypatch, tmp_path, [_req("MSc", "degree", "must_have", ["MSc"])])
+        assert r["score"] >= config.FIT_SCORE_THRESHOLD  # a degree gap alone never drops a role
 
 
 def test_requirement_without_keywords_is_unverifiable_not_blocking():
     assert rc.evaluate([_req("Machine learning and data analysis experience", "technology")], CV) == \
         ([], ["Machine learning and data analysis experience"])
+
+
+class TestComputeScore:
+    def test_all_must_haves_met_scores_high(self):
+        reqs = [_req("Python", "language", "must_have", ["Python"]), _req("ML", "domain", "must_have", ["machine learning"])]
+        assert rc.compute_score(reqs, CV) >= 85
+
+    def test_degree_gap_is_mild(self):
+        base = [_req("Python", "language", "must_have", ["Python"])]
+        with_degree = base + [_req("MSc", "degree", "must_have", ["MSc"])]
+        assert rc.compute_score(base, CV) - rc.compute_score(with_degree, CV) <= 15
+
+    def test_skill_gap_is_heavy(self):
+        reqs = [_req("Python", "language", "must_have", ["Python"]), _req("Rust", "language", "must_have", ["Rust"])]
+        assert rc.compute_score(reqs, CV) < 65
+
+    def test_nothing_checkable_returns_none(self):
+        assert rc.compute_score([_req("vague", "technology", "must_have")], CV) is None

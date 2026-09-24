@@ -46,7 +46,7 @@ Be conservative: mark as maybe_gap when uncertain rather than must_have_met.
 Extract the role's requirements; the candidate's fit is checked in code against the real CV, so
 do not judge blockers yourself. For EACH stated requirement give:
   "text": the requirement, "kind": one of language | technology | domain | degree | years | soft,
-  "necessity": "required" (must/required/mandatory/minimum) or "preferred" (nice to have/advantage/plus),
+  "necessity": "must_have" (must/required/mandatory/minimum) or "nice_to_have" (preferred/advantage/plus),
   "any_of": every acceptable keyword for it -- if the posting offers alternatives ("Python, C++ or Java")
   list them all; for a domain give the field's names (e.g. ["chip design","ASIC","SoC"]).
 Split compound sentences into one requirement per skill ("ML and data analysis" -> two items). "any_of"
@@ -210,6 +210,10 @@ def _apply_requirements_check(result: dict) -> dict:
     if not cv:
         return result
     blocking, other = requirements_check.evaluate(reqs, cv)
+    computed = requirements_check.compute_score(reqs, cv)
+    if computed is not None:
+        result["model_score"] = result.get("score")
+        result["score"] = computed
     result["hard_requirement_gaps"] = blocking
     result["must_have_gaps"] = blocking + other
     return result

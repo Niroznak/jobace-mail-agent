@@ -40,6 +40,49 @@ def _term_in_cv(term: str, cv_norm: str) -> bool:
     return re.search(rf"(?<![\w+#]){re.escape(term)}(?![\w+#])", cv_norm) is not None
 
 
+# Skill/domain must-haves drive the score as a coverage share. Degree and years are NOT
+# part of that share -- an unmet one is only a small fixed deduction (a BSc against an
+# "MSc preferred" role is not a show-stopper); soft skills don't count.
+_SKILL_KINDS = {"language", "technology", "domain"}
+_UNMET_PENALTY = {"years": 8, "degree": 4}
+_REQUIRED_WORDS = {"required", "must_have", "must-have", "must"}
+
+
+def compute_score(requirements: list[dict], cv_text: str) -> int | None:
+    """Score derived purely from the classified requirements + the CV: 25 base, up to 60
+    for the share of skill/domain must-haves met, up to 15 for nice-to-haves met, minus
+    small fixed deductions for an unmet degree/years must-have. Returns None when nothing
+    checkable was extracted (caller falls back to the model's number). Blockers are
+    handled separately by evaluate() and cap the final score."""
+    cv_norm = _norm(cv_text)
+    skill_met = skill_total = nice_met = nice_total = 0
+    penalty = 0
+    checked = False
+    for req in requirements or []:
+        if not isinstance(req, dict):
+            continue
+        keywords = [str(k) for k in (req.get("any_of") or []) if k]
+        if not keywords:
+            continue
+        checked = True
+        met = any(_term_in_cv(k, cv_norm) for k in keywords)
+        kind = str(req.get("kind") or "").lower()
+        if str(req.get("necessity") or "").lower() in _REQUIRED_WORDS:
+            if kind in _SKILL_KINDS:
+                skill_total += 1
+                skill_met += met
+            elif not met:
+                penalty += _UNMET_PENALTY.get(kind, 0)
+        else:
+            nice_total += 1
+            nice_met += met
+    if not checked:
+        return None
+    skill_cov = skill_met / skill_total if skill_total else 0.75
+    nice_cov = nice_met / nice_total if nice_total else 0.5
+    return max(0, round(25 + 60 * skill_cov + 15 * nice_cov - penalty))
+
+
 def evaluate(requirements: list[dict], cv_text: str) -> tuple[list[str], list[str]]:
     """Returns (blocking_gaps, other_gaps) as human-readable requirement texts."""
     cv_norm = _norm(cv_text)
@@ -58,6 +101,6 @@ def evaluate(requirements: list[dict], cv_text: str) -> tuple[list[str], list[st
         if any(_term_in_cv(k, cv_norm) for k in keywords):
             continue
         kind = str(req.get("kind") or "").lower()
-        required = str(req.get("necessity") or "").lower() == "required"
+        required = str(req.get("necessity") or "").lower() in _REQUIRED_WORDS
         (blocking if required and kind in BLOCKING_KINDS else other).append(text)
     return blocking, other
