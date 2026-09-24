@@ -100,6 +100,82 @@ _JSON_DUMP_MARKERS = ("&#34;", '\\"', '":', '": "')
 _JSON_DUMP_MAX_MARKERS_PER_1000_CHARS = 8
 
 
+# Section headings that mark where the role's OWN content starts. Real incident: a long
+# "Company Overview / About us" intro filled the first 3000-5000 chars, so head-truncation
+# stored (and scored) only boilerplate while the actual requirements sat past the cut.
+_ROLE_SECTION_RE = re.compile(
+    r"^[ \t]*(?:job[ \t]+description|the[ \t]+role|about[ \t]+the[ \t]+(?:role|job|position|team)|"
+    r"role[ \t]+overview|position[ \t]+overview|responsibilit\w*|what[ \t]+you(?:'|’)?ll[ \t]+do|"
+    r"what[ \t]+you[ \t]+will[ \t]+do|your[ \t]+role|key[ \t]+responsibilit\w*|requirements?|"
+    r"(?:minimum|basic|preferred|key)[ \t]+qualifications?|qualifications?|"
+    r"what[ \t]+we(?:'|’)?re[ \t]+looking[ \t]+for|who[ \t]+you[ \t]+are|"
+    r"דרישות|תחומי[ \t]+אחריות|תיאור[ \t]+התפקיד|כישורים)"
+    r"[^\n]{0,40}$",
+    re.IGNORECASE | re.MULTILINE,
+)
+
+
+# Headings for sections that are about the COMPANY / process rather than the role. Everything
+# under one of these (until the next role heading) is dropped -- it costs tokens and, being
+# saturated with company buzzwords, actively misleads the scorer.
+_COMPANY_SECTION_RE = re.compile(
+    r"^[ \t]*(?:about[ \t]+(?:us|the[ \t]+company|our[ \t]+company)|about[ \t]+[A-Z][\w.&-]*(?:[ \t]+[A-Z][\w.&-]*){0,3}|"
+    r"company[ \t]+(?:overview|description|profile)|who[ \t]+we[ \t]+are|our[ \t]+(?:mission|story|values|culture|vision|company)|"
+    r"why[ \t]+(?:join|work|you(?:'|’)ll[ \t]+love)[^\n]{0,30}|(?:what|why)[ \t]+we[ \t]+offer|what[ \t]+we[ \t]+offer|"
+    r"benefits?(?:[ \t]+and[ \t]+perks)?|perks(?:[ \t]+and[ \t]+benefits)?|compensation[^\n]{0,20}|"
+    r"equal[ \t]+opportunity[^\n]{0,40}|diversity[^\n]{0,40}|eeo[^\n]{0,30}|how[ \t]+to[ \t]+apply|"
+    r"group[ \t]*/?[ \t]*division|life[ \t]+at[ \t]+[^\n]{1,30}|"
+    r"עלינו|על[ \t]+החברה|מי[ \t]+אנחנו|למה[ \t]+אצלנו)"
+    r"[ \t]*:?[ \t]*$",
+    re.IGNORECASE | re.MULTILINE,
+)
+_EEO_INLINE_RE = re.compile(r"equal[ \t]+opportunity[ \t]+employer|we[ \t]+are[ \t]+an[ \t]+equal|does[ \t]+not[ \t]+discriminate|inclusive[ \t]+environment|commitment[ \t]+to[ \t]+(?:diversity|equal)", re.IGNORECASE)
+_MIN_FOCUSED_CHARS = 200
+
+
+def focus_description(text: str, limit: int) -> str:
+    """Keep only what matters for judging fit -- what the role does and what the
+    candidate needs -- and drop company intros, benefits, EEO boilerplate and similar.
+    Real incident: a long "Company Overview / About us" intro filled the first 3000-5000
+    chars, so head-truncation stored (and scored) only boilerplate while the actual
+    requirements sat past the cut, and its buzzwords inflated the score.
+
+    Walks the text line by line: a company-section heading switches to "drop", a role
+    heading (responsibilities / requirements / qualifications ...) switches back to
+    "keep". Text before the first role heading is dropped when any role heading exists.
+    Falls back to plain head truncation when nothing recognisable remains."""
+    text = text or ""
+    if not _ROLE_SECTION_RE.search(text):
+        return text[:limit]
+    keep_lines: list[str] = []
+    keeping = False  # everything before the first role heading is intro
+    for line in text.split("\n"):
+        if _ROLE_SECTION_RE.match(line):
+            keeping = True
+        elif _COMPANY_SECTION_RE.match(line):
+            keeping = False
+        elif keeping and _EEO_INLINE_RE.search(line):
+            keeping = False
+        if keeping:
+            keep_lines.append(line)
+    focused = "\n".join(keep_lines).strip()
+    if len(focused) < _MIN_FOCUSED_CHARS:
+        return text[:limit]
+    return focused[:limit]
+
+
+def refetch_full_description(url: str) -> str:
+    """Best-effort re-read of a posting's full text from its stored URL (used by the
+    manual re-score/calibration scripts, whose stored sheet text is truncated)."""
+    if not url:
+        return ""
+    try:
+        posting = fetch_linkedin_posting(url) if "linkedin.com" in url else fetch_generic_posting(url)
+    except Exception:
+        return ""
+    return "" if posting.closed else (posting.description or "")
+
+
 def _looks_like_json_dump(text: str) -> bool:
     if not text:
         return False

@@ -37,14 +37,14 @@ class TestEvaluate:
 
 
 class TestScoreIntegration:
-    def _score(self, monkeypatch, tmp_path, requirements):
+    def _score(self, monkeypatch, tmp_path, requirements, extra=""):
         cv = tmp_path / "cv.txt"
         cv.write_text(CV, encoding="utf-8")
         monkeypatch.setattr(config, "CV_TEXT_PATH", str(cv))
         monkeypatch.setattr(cv_matcher, "ensure_profile", lambda: {})
         monkeypatch.setattr(llm_client, "call_json", lambda p, **k: {
             "score": 73, "requirements": requirements, "summary": "ok"})
-        content = "Requirements:\n- stuff\nResponsibilities:\n- build things\nQualifications: x"
+        content = "Requirements:\n- chip design experience, MSc\nResponsibilities:\n- build things\nQualifications: x"
         return cv_matcher.score_job_email("Acme", "Engineer", content)
 
     def test_missing_required_domain_is_capped_below_threshold(self, monkeypatch, tmp_path):
@@ -85,3 +85,22 @@ def test_annotate_marks_coverage_and_level():
                        _req("vague", "technology", "must_have")], CV)
     assert [(o["skill"], o["level"], o["met"]) for o in out] == [
         ("Python", "must_have", True), ("Rust", "nice_to_have", False), ("vague", "must_have", None)]
+
+
+class TestKeywordsMustComeFromThePosting:
+    def test_cv_skill_not_in_posting_is_ignored(self):
+        # Model copied "Pandas" from the CV profile into any_of; the posting never says it.
+        reqs = [_req("data tools", "technology", "must_have", ["Pandas"])]
+        assert rc.compute_score(reqs, "Pandas, Python", "We need a great engineer") is None
+
+    def test_snake_case_and_long_phrases_are_dropped(self):
+        reqs = [_req("x", "technology", "must_have", ["built_with_ai"])]
+        assert rc.evaluate(reqs, CV, "you have built with ai in production") == ([], ["x"])
+
+    def test_hyphen_and_space_variants_match(self):
+        assert rc.evaluate([_req("t", "technology", "must_have", ["time-series"])],
+                           "worked on time series forecasting", "time-series modeling") == ([], [])
+
+    def test_score_never_reaches_100(self):
+        reqs = [_req("Python", "language", "must_have", ["Python"]), _req("SQL", "technology", "nice_to_have", ["SQL"])]
+        assert rc.compute_score(reqs, CV + " SQL", "Python and SQL") <= 95

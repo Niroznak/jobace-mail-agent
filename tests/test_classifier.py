@@ -235,3 +235,17 @@ class TestParseIndeedDigest:
 
     def test_non_indeed_body_returns_empty(self):
         assert classifier.parse_indeed_digest("Thank you for your application.") == []
+
+
+class TestFocusDescription:
+    def test_skips_company_overview_when_too_long(self):
+        from mail_agent import job_page_fetcher as f
+        text = "Company Overview\n" + ("We are a global leader. " * 200) + "\nJob Description\n" + ("Build and ship ML models for production. " * 8) + "\nMinimum Qualifications\nPython, C++\nBenefits\nFree lunch and a gym membership"
+        out = f.focus_description(text, 500)
+        assert out.startswith("Job Description") and "Python, C++" in out
+        assert "global leader" not in out and "Free lunch" not in out
+
+    def test_short_text_untouched_and_no_heading_falls_back_to_head(self):
+        from mail_agent import job_page_fetcher as f
+        assert f.focus_description("short", 500) == "short"
+        assert f.focus_description("x" * 900, 500) == "x" * 500

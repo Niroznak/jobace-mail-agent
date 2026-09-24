@@ -50,7 +50,7 @@ do not judge blockers yourself. For EACH stated requirement give:
   "any_of": every acceptable keyword for it -- if the posting offers alternatives ("Python, C++ or Java")
   list them all; for a domain give the field's names (e.g. ["chip design","ASIC","SoC"]).
 Split compound sentences into one requirement per skill ("ML and data analysis" -> two items). "any_of"
-must be short keywords (1-3 words each) that would literally appear in a CV -- never a sentence, never empty
+must be short keywords (1-2 words each) copied from THIS posting's own wording (never from the candidate's profile) that would also literally appear in a CV -- never a sentence, never empty
 for a language/technology/domain requirement.
 Cover programming languages, technologies/tools and the professional domain/field the role demands.
 
@@ -186,10 +186,10 @@ def score_job_email(company: str, title: str, content: str) -> dict:
         cv_profile=json.dumps(profile, ensure_ascii=False),
         company=company,
         title=title,
-        content=content[:config.DESCRIPTION_SCORE_CHARS],
+        content=job_page_fetcher.focus_description(content, config.DESCRIPTION_SCORE_CHARS),
     )
-    result = llm_client.call_json(prompt, num_predict=600)  # raises on failure; caller decides retry behavior
-    return _apply_hard_requirement_cap(_apply_requirements_check(result))
+    result = llm_client.call_json(prompt, num_predict=1500)  # raises on failure; caller decides retry behavior
+    return _apply_hard_requirement_cap(_apply_requirements_check(result, content))
 
 
 def _cv_text() -> str:
@@ -200,7 +200,7 @@ def _cv_text() -> str:
         return ""
 
 
-def _apply_requirements_check(result: dict) -> dict:
+def _apply_requirements_check(result: dict, posting_text: str = "") -> dict:
     """Replaces the model's own opinion of blockers with the code-checked result: every
     required language/technology/domain is matched against the real CV text."""
     reqs = result.get("requirements")
@@ -209,12 +209,12 @@ def _apply_requirements_check(result: dict) -> dict:
     cv = _cv_text()
     if not cv:
         return result
-    blocking, other = requirements_check.evaluate(reqs, cv)
-    computed = requirements_check.compute_score(reqs, cv)
+    blocking, other = requirements_check.evaluate(reqs, cv, posting_text)
+    computed = requirements_check.compute_score(reqs, cv, posting_text)
     if computed is not None:
         result["model_score"] = result.get("score")
         result["score"] = computed
-    result["requirements_checked"] = requirements_check.annotate(reqs, cv)
+    result["requirements_checked"] = requirements_check.annotate(reqs, cv, posting_text)
     result["hard_requirement_gaps"] = blocking
     result["must_have_gaps"] = blocking + other
     return result

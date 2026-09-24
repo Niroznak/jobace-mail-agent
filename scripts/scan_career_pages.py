@@ -152,7 +152,7 @@ def run(dry_run: bool = False) -> None:
             if not dry_run:
                 row_number = position_sheet.append_position(sheets, position_sheet.PositionRecord(
                     company=resolved_company, title=title, status=config.STATUS_NOT_APPLIED_YET, date_saved=today,
-                    url=url, description=posting.description[:config.DESCRIPTION_STORE_CHARS],
+                    url=url, description=job_page_fetcher.focus_description(posting.description, config.DESCRIPTION_STORE_CHARS),
                     notes=notes, job_id=jid, fit_score=score,
                 ))
                 notifier.notify_new_match(resolved_company, title, score)

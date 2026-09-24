@@ -11,6 +11,7 @@ import logging
 
 from .. import config
 from .. import guardrails
+from .. import job_page_fetcher
 from .. import notifier
 from .. import position_sheet
 from .. import sheets_client
@@ -33,7 +34,7 @@ def _reconcile_new_position(item: ScoredItem, sheet_rows: list[dict], sheets, dr
     notes = sheets_client.append_status_history(item.summary, config.STATUS_NOT_APPLIED_YET, c.date_utc)
     record = position_sheet.PositionRecord(
         company=v.company, title=v.title, status=config.STATUS_NOT_APPLIED_YET, date_saved=c.date_utc,
-        url=v.url, location=c.location, description=v.description[:config.DESCRIPTION_STORE_CHARS],
+        url=v.url, location=c.location, description=job_page_fetcher.focus_description(v.description, config.DESCRIPTION_STORE_CHARS),
         notes=notes, job_id=v.job_id, fit_score=item.score, contact_name=c.contact_name,
         requirements=item.requirements_json,
     )

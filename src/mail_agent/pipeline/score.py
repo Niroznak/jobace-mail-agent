@@ -10,6 +10,7 @@ import logging
 
 from .. import config
 from .. import cv_matcher
+from .. import job_page_fetcher
 from .. import state
 from .types import ScoredItem, VerifiedPosition
 
@@ -18,7 +19,7 @@ logger = logging.getLogger(__name__)
 
 def score_position(verified: VerifiedPosition, description_score_chars: int | None = None) -> ScoredItem | None:
     company, title = verified.company, verified.title
-    content = verified.description[: description_score_chars or config.DESCRIPTION_SCORE_CHARS]
+    content = job_page_fetcher.focus_description(verified.description, description_score_chars or config.DESCRIPTION_SCORE_CHARS)
     result = cv_matcher.score_job_email(company, title, content)
     score = result.get("score", -1)
 

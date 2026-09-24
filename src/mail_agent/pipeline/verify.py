@@ -120,7 +120,7 @@ def _verify_linkedin_digest(candidate: Candidate, sheet_rows: list[dict], retry_
     # stated at all (a real requisition ID always trumps description matching; see
     # dedup.job_id_for's own docstring for why).
     if not requisition_id and sheets_client.find_row_by_company_and_description(
-        sheets_client.active_rows(sheet_rows), company, description[:config.DESCRIPTION_STORE_CHARS]
+        sheets_client.active_rows(sheet_rows), company, job_page_fetcher.focus_description(description, config.DESCRIPTION_STORE_CHARS)
     ):
         logger.info("[VERIFY] '%s @ %s' already tracked (identical description, no requisition ID stated), skipping.", title, company)
         return None
