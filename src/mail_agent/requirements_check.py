@@ -83,6 +83,25 @@ def compute_score(requirements: list[dict], cv_text: str) -> int | None:
     return max(0, round(25 + 60 * skill_cov + 15 * nice_cov - penalty))
 
 
+def annotate(requirements: list[dict], cv_text: str) -> list[dict]:
+    """Each extracted requirement plus whether the CV covers it (None = no keywords to
+    check). This is what gets stored in the sheet's `requirements` column."""
+    cv_norm = _norm(cv_text)
+    out = []
+    for req in requirements or []:
+        if not isinstance(req, dict) or not str(req.get("text") or "").strip():
+            continue
+        keywords = [str(k) for k in (req.get("any_of") or []) if k]
+        out.append({
+            "skill": str(req["text"]).strip(),
+            "kind": str(req.get("kind") or "").lower(),
+            "level": "must_have" if str(req.get("necessity") or "").lower() in _REQUIRED_WORDS else "nice_to_have",
+            "any_of": keywords,
+            "met": any(_term_in_cv(k, cv_norm) for k in keywords) if keywords else None,
+        })
+    return out
+
+
 def evaluate(requirements: list[dict], cv_text: str) -> tuple[list[str], list[str]]:
     """Returns (blocking_gaps, other_gaps) as human-readable requirement texts."""
     cv_norm = _norm(cv_text)

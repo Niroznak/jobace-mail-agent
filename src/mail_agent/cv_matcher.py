@@ -214,6 +214,7 @@ def _apply_requirements_check(result: dict) -> dict:
     if computed is not None:
         result["model_score"] = result.get("score")
         result["score"] = computed
+    result["requirements_checked"] = requirements_check.annotate(reqs, cv)
     result["hard_requirement_gaps"] = blocking
     result["must_have_gaps"] = blocking + other
     return result

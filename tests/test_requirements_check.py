@@ -77,3 +77,11 @@ class TestComputeScore:
 
     def test_nothing_checkable_returns_none(self):
         assert rc.compute_score([_req("vague", "technology", "must_have")], CV) is None
+
+
+def test_annotate_marks_coverage_and_level():
+    out = rc.annotate([_req("Python", "language", "must_have", ["Python"]),
+                       _req("Rust", "language", "nice_to_have", ["Rust"]),
+                       _req("vague", "technology", "must_have")], CV)
+    assert [(o["skill"], o["level"], o["met"]) for o in out] == [
+        ("Python", "must_have", True), ("Rust", "nice_to_have", False), ("vague", "must_have", None)]

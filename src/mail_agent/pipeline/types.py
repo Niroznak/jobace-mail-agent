@@ -68,6 +68,7 @@ class ScoredItem:
     verified: VerifiedPosition
     score: int
     summary: str
+    requirements_json: str = ""  # extracted skills + CV coverage, stored in the sheet
 
 
 @dataclass

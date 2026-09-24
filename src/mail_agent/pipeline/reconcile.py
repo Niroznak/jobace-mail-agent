@@ -35,6 +35,7 @@ def _reconcile_new_position(item: ScoredItem, sheet_rows: list[dict], sheets, dr
         company=v.company, title=v.title, status=config.STATUS_NOT_APPLIED_YET, date_saved=c.date_utc,
         url=v.url, location=c.location, description=v.description[:config.DESCRIPTION_STORE_CHARS],
         notes=notes, job_id=v.job_id, fit_score=item.score, contact_name=c.contact_name,
+        requirements=item.requirements_json,
     )
     row_number = -1
     if not dry_run:

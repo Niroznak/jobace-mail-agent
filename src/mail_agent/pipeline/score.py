@@ -5,6 +5,7 @@ stage 5, no sheet write.
 """
 from __future__ import annotations
 
+import json
 import logging
 
 from .. import config
@@ -27,4 +28,8 @@ def score_position(verified: VerifiedPosition, description_score_chars: int | No
         return None
 
     logger.info("[SCORE] '%s @ %s' score=%s -> passed, queued for reconciliation.", title, company, score)
-    return ScoredItem(verified=verified, score=score, summary=result.get("summary", ""))
+    checked = result.get("requirements_checked") or []
+    return ScoredItem(
+        verified=verified, score=score, summary=result.get("summary", ""),
+        requirements_json=json.dumps(checked, ensure_ascii=False, separators=(",", ":")) if checked else "",
+    )
