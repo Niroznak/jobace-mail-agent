@@ -185,3 +185,34 @@ class TestApplicationAckSubjectOverride:
         msg = _msg("New job alert: Engineer at Acme", sender_name="LinkedIn")
         result = classifier.classify_email(msg)
         assert result["category"] == "job_opportunity"
+
+
+class TestLinkedinApplicationSentSubject:
+    """Real incident: "Nir, your application was sent to BigBear.ai" was classified
+    job_opportunity/empty company by the 7b model, and the subject safety net didn't
+    cover LinkedIn's own "was sent" phrasing -- the confirmation was silently skipped
+    and the row's status never moved to applied."""
+
+    def test_overrides_for_linkedin_was_sent_phrasing(self, monkeypatch):
+        monkeypatch.setattr(
+            llm_client, "call_json",
+            lambda prompt, **k: {"category": "job_opportunity", "company": "", "role_title": "",
+                                  "position_id": "", "contact_name": "", "location": "", "status": "", "notes": ""},
+        )
+        msg = _msg("Nir, your application was sent to BigBear.ai", sender_name="LinkedIn")
+        result = classifier.classify_email(msg)
+        assert result["category"] == "application_reply"
+        assert result["status"] == "applied"
+
+
+class TestConfirmCompanyNameRejectsSentences:
+    def test_sentence_shaped_answer_keeps_original_guess(self, monkeypatch):
+        monkeypatch.setattr(
+            llm_client, "call_json",
+            lambda prompt, **k: {"company": "An innovative startup developing AI-driven predictive platforms for health monitoring."},
+        )
+        assert classifier.confirm_company_name("page text", "Megayeset") == "Megayeset"
+
+    def test_short_real_name_is_accepted(self, monkeypatch):
+        monkeypatch.setattr(llm_client, "call_json", lambda prompt, **k: {"company": "BigBear.ai"})
+        assert classifier.confirm_company_name("page text", "CargoSeer") == "BigBear.ai"

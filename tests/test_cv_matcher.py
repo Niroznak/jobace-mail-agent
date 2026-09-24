@@ -119,3 +119,38 @@ class TestCitizenshipRestrictionGate:
         monkeypatch.setattr(cv_matcher, "ensure_profile", lambda: {"skills": []})
         result = cv_matcher.score_job_email("Acme", "Senior Engineer", self._real_posting("Remote work available."))
         assert result["score"] == 80
+
+
+class TestLlmClientDoesNotForceContextSize:
+    """Real incident: llm_client sent num_ctx=4096 while another project shared the
+    same Ollama runner at its default context. A request whose num_ctx differs from
+    the loaded runner's must wait for it to go idle -- which that busy job never did,
+    so every call starved (Ollama logged zero completed /api/chat requests all day)."""
+
+    def _captured_payload(self, monkeypatch):
+        import json
+        captured = {}
+
+        class _Resp:
+            def __enter__(self): return self
+            def __exit__(self, *a): return False
+            def read(self): return json.dumps({"message": {"content": "{}"}}).encode()
+
+        def _fake_urlopen(req, timeout=None):
+            captured["payload"] = json.loads(req.data.decode())
+            return _Resp()
+
+        monkeypatch.setattr(llm_client.urllib.request, "urlopen", _fake_urlopen)
+        return captured
+
+    def test_omits_num_ctx_by_default(self, monkeypatch):
+        captured = self._captured_payload(monkeypatch)
+        llm_client.call_json("hi")
+        assert "num_ctx" not in captured["payload"]["options"]
+
+    def test_sends_num_ctx_only_when_configured(self, monkeypatch):
+        from mail_agent import config
+        monkeypatch.setattr(config, "OLLAMA_NUM_CTX", 4096)
+        captured = self._captured_payload(monkeypatch)
+        llm_client.call_json("hi")
+        assert captured["payload"]["options"]["num_ctx"] == 4096

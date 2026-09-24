@@ -181,6 +181,10 @@ OLLAMA_HOST = "http://localhost:11434"
 OLLAMA_MODEL = "qwen2.5:7b"
 OLLAMA_MODEL_CV_PARSE = "qwen2.5:7b"
 OLLAMA_KEEP_ALIVE = "30m"
+# None = don't override Ollama's default context (see llm_client.call_json for why:
+# a num_ctx that differs from a shared runner's starves behind other projects'
+# requests). Only set this if this is the sole project using this Ollama server.
+OLLAMA_NUM_CTX = None
 # Real incident (2026-09-22): another long-running task on this machine held the GPU
 # for hours, so this agent's calls sat queued behind it in Ollama's single-GPU serial
 # queue -- not stuck, just waiting their turn. With no runaway-generation risk left

@@ -196,7 +196,8 @@ PLATFORM_SENDER_DOMAINS = {
 _APPLICATION_ACK_SUBJECT_RE = re.compile(
     r"thank you for (your interest|applying|your application)"
     r"|(we|thanks).{0,25}received your application"
-    r"|your application (to|for|at|has been)",
+    r"|your application (to|for|at|has been)"
+    r"|your application was (sent|submitted|received)",
     re.IGNORECASE,
 )
 
@@ -350,6 +351,19 @@ PAGE TEXT:
 """
 
 
+# Real incident: for a recruiting-agency posting the model "confirmed" the company as a
+# full descriptive sentence ("An innovative startup developing AI-driven predictive
+# platforms for continuous, non-invasive health monitoring.") and it was written to the
+# sheet as the company. A real company name is short; anything sentence-shaped is the
+# model describing the employer instead of naming it, so keep the original guess.
+_MAX_COMPANY_NAME_CHARS = 60
+_MAX_COMPANY_NAME_WORDS = 6
+
+
+def _looks_like_company_name(name: str) -> bool:
+    return len(name) <= _MAX_COMPANY_NAME_CHARS and len(name.split()) <= _MAX_COMPANY_NAME_WORDS
+
+
 def confirm_company_name(page_text: str, guessed_company: str) -> str:
     """Asks the LLM to confirm/correct the hiring company name against real fetched
     page text, since the emailed guess (often just the sender) isn't always the real
@@ -361,7 +375,9 @@ def confirm_company_name(page_text: str, guessed_company: str) -> str:
         logger.exception("Company-name confirmation failed for guess=%r", guessed_company)
         return guessed_company
     confirmed = (result.get("company") or "").strip()
-    return confirmed if confirmed else guessed_company
+    if not confirmed or not _looks_like_company_name(confirmed):
+        return guessed_company
+    return confirmed
 
 
 # junior/intern/student-level roles are never relevant regardless of fit score.

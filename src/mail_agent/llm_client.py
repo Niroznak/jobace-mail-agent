@@ -36,16 +36,23 @@ _DEFAULT_NUM_PREDICT = 400
 def call_json(
     prompt: str, timeout: int | None = None, model: str | None = None, num_predict: int | None = None
 ) -> dict:
+    options = {"temperature": 0.1, "num_predict": num_predict or _DEFAULT_NUM_PREDICT}
+    # num_ctx is deliberately NOT sent unless configured. Real incident (2026-09-24):
+    # another project shares this Ollama server and model at Ollama's default context.
+    # A request whose num_ctx differs from the loaded runner's needs the runner to go
+    # idle so it can reload -- but that other job never goes idle, so every mail-agent
+    # call starved for the full timeout and Ollama logged zero completed /api/chat
+    # requests all day, while a request without num_ctx was served in ~1 s. Matching
+    # the loaded runner's configuration is what lets our requests interleave with
+    # another project's instead of waiting for it to finish.
+    if config.OLLAMA_NUM_CTX:
+        options["num_ctx"] = config.OLLAMA_NUM_CTX
     payload = {
         "model": model or config.OLLAMA_MODEL,
         "messages": [{"role": "user", "content": prompt}],
         "stream": False,
         "format": "json",
-        "options": {
-            "temperature": 0.1,
-            "num_ctx": 4096,
-            "num_predict": num_predict or _DEFAULT_NUM_PREDICT,
-        },
+        "options": options,
         "keep_alive": config.OLLAMA_KEEP_ALIVE,
     }
     data = json.dumps(payload).encode("utf-8")
