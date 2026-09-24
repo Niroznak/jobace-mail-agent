@@ -92,7 +92,7 @@ def _extract_from_single_email(msg: EmailMessage, sheet_rows: list[dict]) -> lis
         # generic multi-posting extraction as a recovery path rather than silently
         # dropping real postings. Only acts if it confidently finds >=2 distinct
         # real postings; otherwise this is a no-op and the skip logic below runs.
-        generic_postings = classifier.parse_generic_digest(msg.subject, msg.body)
+        generic_postings = classifier.parse_indeed_digest(msg.body) or classifier.parse_generic_digest(msg.subject, msg.body)
         if generic_postings:
             candidates = [
                 Candidate(

@@ -144,6 +144,40 @@ Body:
 """
 
 
+_INDEED_CLICK_URL_RE = re.compile(r"^https?://\S*indeed\.com/\S*(?:rc/clk|viewjob)\S*$")
+_INDEED_AGE_RE = re.compile(r"^\d+\+?\s+(?:hours?|days?|weeks?|months?)\s+ago$|^(?:just posted|today|new)$", re.I)
+
+
+def parse_indeed_digest(body: str) -> list[dict]:
+    """Deterministic parser for Indeed job-alert emails. Each posting is a block:
+    title / "Company - Location" / snippet / age / click URL. Anchored on the click URL
+    line, so a 20-job alert needs no LLM call (the model-based generic parser overflowed
+    its output cap on exactly such a mail and dropped every posting)."""
+    lines = [ln.strip().replace(" ", " ") for ln in (body or "").splitlines()]
+    postings = []
+    for i, line in enumerate(lines):
+        if not _INDEED_CLICK_URL_RE.match(line):
+            continue
+        block = []
+        for prev in reversed(lines[:i]):
+            if not prev:
+                if block:
+                    break
+                continue
+            block.append(prev)
+        block.reverse()
+        if block and _INDEED_AGE_RE.match(block[-1]):
+            block.pop()
+        if len(block) < 2 or " - " not in block[1]:
+            continue
+        company, _, location = block[1].partition(" - ")
+        postings.append({
+            "title": block[0], "company": company.strip(), "location": location.strip(),
+            "url": line, "snippet": " ".join(block[2:]),
+        })
+    return postings
+
+
 def parse_generic_digest(subject: str, body: str) -> list[dict]:
     """Returns [{"title", "company", "location", "url", "snippet"}, ...] for each
     distinct posting the LLM could confidently identify, or [] if it found fewer than

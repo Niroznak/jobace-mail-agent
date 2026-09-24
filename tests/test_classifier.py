@@ -216,3 +216,22 @@ class TestConfirmCompanyNameRejectsSentences:
     def test_short_real_name_is_accepted(self, monkeypatch):
         monkeypatch.setattr(llm_client, "call_json", lambda prompt, **k: {"company": "BigBear.ai"})
         assert classifier.confirm_company_name("page text", "CargoSeer") == "BigBear.ai"
+
+
+class TestParseIndeedDigest:
+    BODY = (
+        "Indeed Job Alert\n20 new ai engineer jobs in Haifa\n\n"
+        "AI Regulatory Engineer\nGE HEALTHCARE - Haifa, Israel\nan engineer to ensure... more...\n6 days ago\n"
+        "https://il.indeed.com/rc/clk/dl?jk=aaa&from=ja\n\n"
+        "Data\xa0&\xa0AI Platform Team Leader\nGE HEALTHCARE - Haifa, Israel\nthat accelerate AI deployment...\n6 days ago\n"
+        "https://il.indeed.com/rc/clk/dl?jk=bbb&from=ja\n"
+    )
+
+    def test_parses_every_block(self):
+        posts = classifier.parse_indeed_digest(self.BODY)
+        assert [p["title"] for p in posts] == ["AI Regulatory Engineer", "Data & AI Platform Team Leader"]
+        assert posts[0]["company"] == "GE HEALTHCARE" and posts[0]["location"] == "Haifa, Israel"
+        assert posts[1]["url"].endswith("jk=bbb&from=ja")
+
+    def test_non_indeed_body_returns_empty(self):
+        assert classifier.parse_indeed_digest("Thank you for your application.") == []

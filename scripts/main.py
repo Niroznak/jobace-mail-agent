@@ -15,6 +15,7 @@ import argparse
 import logging
 import os
 import sys
+import time
 from collections import Counter
 from datetime import datetime
 
@@ -195,4 +196,19 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     setup_logging()
-    run(dry_run=args.dry_run)
+    # Real incident: two overlapping runs (manual + bat) raced on the same messages and
+    # inserted every position twice. A lock file stops a second instance instead.
+    lock_path = os.path.join(config.DATA_DIR, "main.lock")
+    try:
+        lock_fd = os.open(lock_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+    except FileExistsError:
+        if time.time() - os.path.getmtime(lock_path) < 4 * 3600:
+            logger.error("Another run is in progress (%s). Exiting.", lock_path)
+            sys.exit(1)
+        os.remove(lock_path)
+        lock_fd = os.open(lock_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+    try:
+        run(dry_run=args.dry_run)
+    finally:
+        os.close(lock_fd)
+        os.remove(lock_path)

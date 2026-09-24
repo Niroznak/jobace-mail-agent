@@ -109,7 +109,7 @@ class TestGenericDigestVerification:
         monkeypatch.setattr(sheets_client, "active_rows", lambda rows: rows)
         monkeypatch.setattr(sheets_client, "find_row_by_job_id", lambda rows, jid: None)
         monkeypatch.setattr(classifier, "confirm_company_name", lambda desc, guess: guess)
-        long_snippet = "Real job description. " * (position_resolver.MIN_CONTENT_LENGTH // 20 + 2)
+        long_snippet = "Real job description. " * (verify.MIN_DIGEST_DESCRIPTION_CHARS // 20 + 2)
         result = verify.verify_position(_candidate(source="generic_digest", snippet=long_snippet), [], {})
         assert result is not None
 
@@ -173,3 +173,10 @@ class TestRetryAndGiveUp:
         result = verify.verify_position(candidate, [], retry_state)
         assert result is not None
         assert jid not in retry_state
+
+
+def test_teaser_length_snippet_is_not_scored(monkeypatch):
+    # Indeed teasers are ~160 chars and the page fetch is blocked -- must not be scored.
+    monkeypatch.setattr(verify.job_page_fetcher, "fetch_generic_posting", lambda url: verify.job_page_fetcher.FetchedPosting())
+    result = verify.verify_position(_candidate(source="generic_digest", snippet="x" * 160, url="https://il.indeed.com/rc/clk/dl?jk=1"), [], {})
+    assert result is None

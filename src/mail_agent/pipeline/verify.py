@@ -151,6 +151,13 @@ def _confirm_company(company: str, title: str, description: str, candidate: Cand
     return company, jid
 
 
+# Real incident: an Indeed alert's ~160-char teaser ("Experience... role, you will...")
+# passed the old 100-char bar and was scored 73 for a chip-design role the candidate
+# has no background for -- the teaser hides the requirements. Indeed blocks fetching
+# the full page (HTTP 403), so a teaser can never justify a fit score.
+MIN_DIGEST_DESCRIPTION_CHARS = 500
+
+
 def _verify_generic_digest(candidate: Candidate, sheet_rows: list[dict]) -> VerifiedPosition | None:
     company, title = candidate.company, candidate.title
     jid = dedup.job_id_for(company, title)
@@ -159,7 +166,7 @@ def _verify_generic_digest(candidate: Candidate, sheet_rows: list[dict]) -> Veri
         return None
 
     description = candidate.snippet.strip()
-    if len(description) < position_resolver.MIN_CONTENT_LENGTH and candidate.url:
+    if len(description) < MIN_DIGEST_DESCRIPTION_CHARS and candidate.url:
         try:
             fetched = job_page_fetcher.fetch_generic_posting(candidate.url)
         except Exception:
@@ -167,7 +174,7 @@ def _verify_generic_digest(candidate: Candidate, sheet_rows: list[dict]) -> Veri
         if fetched.description and not fetched.closed:
             description = fetched.description
 
-    if len(description) < position_resolver.MIN_CONTENT_LENGTH:
+    if len(description) < MIN_DIGEST_DESCRIPTION_CHARS:
         # Never score/decide fitness without real content -- a digest snippet this
         # short (or a fetch that failed, e.g. Indeed's known 401 block) isn't an
         # honest basis for a match/no-match judgment. No retry tracking here (same
