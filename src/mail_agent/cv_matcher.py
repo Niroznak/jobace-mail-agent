@@ -10,6 +10,7 @@ import re
 from . import job_page_fetcher
 from . import llm_client
 from . import config
+from . import requirements_check
 
 logger = logging.getLogger(__name__)
 
@@ -42,13 +43,16 @@ _SCORE_PROMPT = """\
 You are a senior technical recruiter. Distinguish "required" from "preferred" in job postings.
 Be conservative: mark as maybe_gap when uncertain rather than must_have_met.
 
-Pay special attention to HARD requirements: a specific, non-substitutable skill/technology stated
-as mandatory that the candidate does not have. Do NOT treat something as a hard requirement if the
-posting offers acceptable alternatives and the candidate has at least one of them -- e.g. "experience
-in a programming language like C++, Python, or Java" is satisfied by knowing any one of those, even
-without Java specifically. Only list a skill in hard_requirement_gaps when it is stated as the sole
-required option with no listed alternative the candidate meets (e.g. "must have Java", "strong Java
-expertise required", "5+ years of Java required").
+Extract the role's requirements; the candidate's fit is checked in code against the real CV, so
+do not judge blockers yourself. For EACH stated requirement give:
+  "text": the requirement, "kind": one of language | technology | domain | degree | years | soft,
+  "necessity": "required" (must/required/mandatory/minimum) or "preferred" (nice to have/advantage/plus),
+  "any_of": every acceptable keyword for it -- if the posting offers alternatives ("Python, C++ or Java")
+  list them all; for a domain give the field's names (e.g. ["chip design","ASIC","SoC"]).
+Split compound sentences into one requirement per skill ("ML and data analysis" -> two items). "any_of"
+must be short keywords (1-3 words each) that would literally appear in a CV -- never a sentence, never empty
+for a language/technology/domain requirement.
+Cover programming languages, technologies/tools and the professional domain/field the role demands.
 
 Score ONLY against this specific role's own stated responsibilities and requirements section --
 never against generic "About the company" / mission-statement / marketing text elsewhere on the
@@ -74,8 +78,9 @@ Respond with ONLY valid JSON (no markdown fences):
 {{
   "score": <integer 0-100>,
   "strengths": [<candidate skills/experience that directly match this job>],
+  "requirements": [{{"text": "", "kind": "", "necessity": "", "any_of": []}}],
   "must_have_gaps": [<required skills the candidate is missing>],
-  "hard_requirement_gaps": [<subset of must_have_gaps that are strict, non-substitutable required skills with no acceptable alternative the candidate has -- empty list if none>],
+  "hard_requirement_gaps": [],
   "summary": "<one concise sentence verdict>"
 }}
 
@@ -184,7 +189,30 @@ def score_job_email(company: str, title: str, content: str) -> dict:
         content=content[:config.DESCRIPTION_SCORE_CHARS],
     )
     result = llm_client.call_json(prompt, num_predict=600)  # raises on failure; caller decides retry behavior
-    return _apply_hard_requirement_cap(result)
+    return _apply_hard_requirement_cap(_apply_requirements_check(result))
+
+
+def _cv_text() -> str:
+    try:
+        with open(config.CV_TEXT_PATH, "r", encoding="utf-8") as f:
+            return f.read()
+    except OSError:
+        return ""
+
+
+def _apply_requirements_check(result: dict) -> dict:
+    """Replaces the model's own opinion of blockers with the code-checked result: every
+    required language/technology/domain is matched against the real CV text."""
+    reqs = result.get("requirements")
+    if not isinstance(reqs, list) or not reqs:
+        return result
+    cv = _cv_text()
+    if not cv:
+        return result
+    blocking, other = requirements_check.evaluate(reqs, cv)
+    result["hard_requirement_gaps"] = blocking
+    result["must_have_gaps"] = blocking + other
+    return result
 
 
 def _apply_hard_requirement_cap(result: dict) -> dict:
