@@ -26,6 +26,14 @@ def score_position(verified: VerifiedPosition, description_score_chars: int | No
     if score < config.FIT_SCORE_THRESHOLD:
         logger.info("[SCORE] '%s @ %s' score=%s < threshold, skipping sheet write.", title, company, score)
         state.log_skipped_candidate(company, title, "LOW_FIT", score, verified.url, result.get("summary", ""))
+        state.log_skipped_detail({
+            "company": company, "title": title, "url": verified.url, "score": score,
+            "mail_id": verified.candidate.mail_id, "scored_text": content,
+            "requirements": result.get("requirements_checked") or [],
+            "blockers": result.get("hard_requirement_gaps") or [],
+            "breakdown": result.get("score_breakdown"), "reasoning": result.get("score_reasoning") or [],
+            "model_score": result.get("model_score"),
+        })
         return None
 
     logger.info("[SCORE] '%s @ %s' score=%s -> passed, queued for reconciliation.", title, company, score)

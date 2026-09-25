@@ -76,3 +76,13 @@ def log_skipped_candidate(company: str, title: str, reason: str, score="", url: 
             "date": date.today().isoformat(), "company": company, "title": title,
             "reason": reason, "score": score, "url": url, "summary": summary,
         })
+
+
+def log_skipped_detail(record: dict) -> None:
+    """Append one JSON line with everything needed to re-score or audit a skipped
+    candidate later: the exact text that was scored, the extracted requirements with CV
+    coverage, the score breakdown and the human-readable reasoning. Never read by pipeline
+    logic (see log_skipped_candidate) -- purely an audit/assessment trail."""
+    record = {"date": date.today().isoformat(), **record}
+    with open(config.SKIPPED_DETAIL_PATH, "a", encoding="utf-8") as f:
+        f.write(json.dumps(record, ensure_ascii=False) + "\n")

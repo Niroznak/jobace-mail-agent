@@ -71,6 +71,10 @@ CV_PROFILE_CACHE_PATH = os.path.join(DATA_DIR, "cv_profile.json")
 PROCESSED_IDS_PATH = os.path.join(DATA_DIR, "processed_ids.json")
 LAST_RUN_PATH = os.path.join(DATA_DIR, "last_run.json")
 SKIPPED_CANDIDATES_PATH = os.path.join(DATA_DIR, "skipped_candidates.csv")
+# Full-detail companion to the CSV: one JSON object per line holding the scored text plus
+# the requirement breakdown and reasoning, so a skip can be re-scored later even after the
+# posting's link is dead, and the scoring method itself can be validated against it.
+SKIPPED_DETAIL_PATH = os.path.join(DATA_DIR, "skipped_detail.jsonl")
 GRAYED_JOB_IDS_PATH = os.path.join(DATA_DIR, "grayed_job_ids.json")
 SEEN_CAREER_POSTINGS_PATH = os.path.join(DATA_DIR, "seen_career_postings.json")
 # Retry-attempt tracking for stage 3 (verify) on a freshly-discovered opportunity

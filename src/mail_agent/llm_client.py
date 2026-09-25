@@ -34,9 +34,15 @@ _DEFAULT_NUM_PREDICT = 400
 
 
 def call_json(
-    prompt: str, timeout: int | None = None, model: str | None = None, num_predict: int | None = None
+    prompt: str, timeout: int | None = None, model: str | None = None, num_predict: int | None = None,
+    deterministic: bool = False,
 ) -> dict:
     options = {"temperature": 0.1, "num_predict": num_predict or _DEFAULT_NUM_PREDICT}
+    if deterministic:
+        # Same input -> same output: requirement extraction feeds a score with a hard cap,
+        # so run-to-run randomness in what the model lists flips verdicts (25 <-> 95).
+        options["temperature"] = 0
+        options["seed"] = 42
     # num_ctx is deliberately NOT sent unless configured. Real incident (2026-09-24):
     # another project shares this Ollama server and model at Ollama's default context.
     # A request whose num_ctx differs from the loaded runner's needs the runner to go

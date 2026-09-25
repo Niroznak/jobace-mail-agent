@@ -24,6 +24,19 @@ class TestScorePosition:
         logged = {}
         monkeypatch.setattr(cv_matcher, "score_job_email", lambda company, title, content: {"score": 20, "summary": "Poor fit."})
         monkeypatch.setattr("mail_agent.pipeline.score.state.log_skipped_candidate", lambda *a, **k: logged.setdefault("called", (a, k)))
+        detail = {}
+        monkeypatch.setattr("mail_agent.pipeline.score.state.log_skipped_detail", lambda rec: detail.update(rec))
         result = score.score_position(_verified())
         assert result is None
         assert logged.get("called") is not None
+        assert detail["scored_text"] and detail["score"] == 20  # text kept so the skip can be re-scored later
+
+    def test_skip_detail_records_blockers_and_reasoning(self, monkeypatch):
+        detail = {}
+        monkeypatch.setattr(cv_matcher, "score_job_email", lambda company, title, content: {
+            "score": 25, "summary": "capped", "hard_requirement_gaps": ["AWS"],
+            "score_reasoning": ["HARD BLOCKER (required, not in CV): AWS"], "requirements_checked": [{"skill": "AWS"}]})
+        monkeypatch.setattr("mail_agent.pipeline.score.state.log_skipped_candidate", lambda *a, **k: None)
+        monkeypatch.setattr("mail_agent.pipeline.score.state.log_skipped_detail", lambda rec: detail.update(rec))
+        assert score.score_position(_verified()) is None
+        assert detail["blockers"] == ["AWS"] and detail["reasoning"][0].startswith("HARD BLOCKER")

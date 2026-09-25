@@ -73,6 +73,7 @@ def score_all(limit: int | None) -> list[dict]:
             "row": r["_row"], "group": group, "title": r.get("title", ""), "company": r.get("company", ""),
             "status": r.get("status", ""), "old_score": r.get("fit_score"), "score": res.get("score", 0),
             "blockers": res.get("hard_requirement_gaps") or [], "requirements": checked,
+            "reasoning": res.get("score_reasoning") or [], "text": desc,
         })
         print(f"row {r['_row']:>3} [{group[:3]}] {res.get('score', 0):>3}  {_A(r.get('title',''))[:40]} @ {_A(r.get('company',''))[:18]}")
     if os.path.exists(RESULTS_PATH):
@@ -103,9 +104,13 @@ def report(results: list[dict]) -> None:
     print(f"\nFALSE POSITIVES (you marked nr, scoring would pass): {len(fp)}")
     for r in fp:
         print(f"  row {r['row']} score={r['score']} {_A(r['title'])[:45]} @ {_A(r['company'])[:20]}")
+        for line in r.get("reasoning", []):
+            print(f"      - {_A(line)[:110]}")
     print(f"\nFALSE NEGATIVES (you applied, scoring would reject): {len(fn)}")
     for r in fn:
         print(f"  row {r['row']} score={r['score']} {_A(r['title'])[:45]} @ {_A(r['company'])[:20]}  blockers={[_A(b)[:40] for b in r['blockers']][:3]}")
+        for line in r.get("reasoning", []):
+            print(f"      - {_A(line)[:110]}")
     thin = [r for r in results if sum(1 for q in r["requirements"] if q.get("met") is not None and q["level"] == "must_have") < 3]
     print(f"\nLOW-CONFIDENCE (<3 checkable must-haves extracted): {len(thin)} of {len(results)}")
     for label, grp in (("nr rows", neg), ("applied rows", pos)):

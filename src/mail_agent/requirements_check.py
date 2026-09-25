@@ -70,16 +70,17 @@ _UNMET_PENALTY = {"years": 8, "degree": 4}
 _REQUIRED_WORDS = {"required", "must_have", "must-have", "must"}
 
 
-def compute_score(requirements: list[dict], cv_text: str, posting_text: str = "") -> int | None:
+def score_breakdown(requirements: list[dict], cv_text: str, posting_text: str = "") -> dict | None:
     """Score derived purely from the classified requirements + the CV: 25 base, up to 60
     for the share of skill/domain must-haves met, up to 10 for nice-to-haves met, minus
     small fixed deductions for an unmet degree/years must-have. Returns None when nothing
     checkable was extracted (caller falls back to the model's number). Blockers are
-    handled separately by evaluate() and cap the final score."""
+    handled separately by evaluate() and cap the final score. The returned dict keeps every
+    component so a skip/pass can be explained and audited later."""
     cv_norm = _norm(cv_text)
     posting_norm = _norm(posting_text)
     skill_met = skill_total = nice_met = nice_total = 0
-    penalty = 0
+    penalties: list[dict] = []
     checked = False
     for req in requirements or []:
         if not isinstance(req, dict):
@@ -95,7 +96,7 @@ def compute_score(requirements: list[dict], cv_text: str, posting_text: str = ""
                 skill_total += 1
                 skill_met += met
             elif not met:
-                penalty += _UNMET_PENALTY.get(kind, 0)
+                penalties.append({"requirement": str(req.get("text") or ""), "points": _UNMET_PENALTY.get(kind, 0)})
         else:
             nice_total += 1
             nice_met += met
@@ -103,7 +104,41 @@ def compute_score(requirements: list[dict], cv_text: str, posting_text: str = ""
         return None
     skill_cov = skill_met / skill_total if skill_total else 0.75
     nice_cov = nice_met / nice_total if nice_total else 0.5
-    return max(0, round(25 + 60 * skill_cov + 10 * nice_cov - penalty))
+    skill_points, nice_points = round(60 * skill_cov, 1), round(10 * nice_cov, 1)
+    penalty = sum(p["points"] for p in penalties)
+    return {
+        "base": 25, "skill_met": skill_met, "skill_total": skill_total, "skill_points": skill_points,
+        "nice_met": nice_met, "nice_total": nice_total, "nice_points": nice_points,
+        "penalties": penalties, "score": max(0, round(25 + skill_points + nice_points - penalty)),
+    }
+
+
+def compute_score(requirements: list[dict], cv_text: str, posting_text: str = "") -> int | None:
+    breakdown = score_breakdown(requirements, cv_text, posting_text)
+    return breakdown["score"] if breakdown else None
+
+
+def explain(breakdown: dict | None, blockers: list[str], final_score: int, model_score=None) -> list[str]:
+    """Human-readable reasoning lines: what capped the score (hard blockers), what
+    lowered or raised it, and the model's own number (recorded, not used)."""
+    lines = []
+    for b in blockers:
+        lines.append(f"HARD BLOCKER (required, not in CV): {b}")
+    if breakdown:
+        lines.append(f"Must-have skills/domains met: {breakdown['skill_met']}/{breakdown['skill_total']} "
+                     f"(+{breakdown['skill_points']} of 60)")
+        lines.append(f"Nice-to-haves met: {breakdown['nice_met']}/{breakdown['nice_total']} "
+                     f"(+{breakdown['nice_points']} of 10)")
+        for p in breakdown["penalties"]:
+            lines.append(f"Unmet requirement (mild): {p['requirement']} (-{p['points']})")
+        lines.append(f"Computed score before blocker cap: {breakdown['score']}")
+    if blockers:
+        lines.append(f"Final score {final_score}: capped because of the hard blocker(s) above")
+    else:
+        lines.append(f"Final score {final_score}")
+    if model_score is not None:
+        lines.append(f"(model's own estimate, not used: {model_score})")
+    return lines
 
 
 def annotate(requirements: list[dict], cv_text: str, posting_text: str = "") -> list[dict]:

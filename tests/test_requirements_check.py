@@ -37,14 +37,14 @@ class TestEvaluate:
 
 
 class TestScoreIntegration:
-    def _score(self, monkeypatch, tmp_path, requirements, extra=""):
+    def _score(self, monkeypatch, tmp_path, requirements, extra="", body="chip design experience, MSc"):
         cv = tmp_path / "cv.txt"
         cv.write_text(CV, encoding="utf-8")
         monkeypatch.setattr(config, "CV_TEXT_PATH", str(cv))
         monkeypatch.setattr(cv_matcher, "ensure_profile", lambda: {})
         monkeypatch.setattr(llm_client, "call_json", lambda p, **k: {
             "score": 73, "requirements": requirements, "summary": "ok"})
-        content = "Requirements:\n- chip design experience, MSc\nResponsibilities:\n- build things\nQualifications: x"
+        content = "Requirements:\n- " + body + "\nResponsibilities:\n- build things\nQualifications: x"
         return cv_matcher.score_job_email("Acme", "Engineer", content)
 
     def test_missing_required_domain_is_capped_below_threshold(self, monkeypatch, tmp_path):
@@ -52,7 +52,7 @@ class TestScoreIntegration:
         assert r["score"] == config.HARD_REQUIREMENT_SCORE_CAP < config.FIT_SCORE_THRESHOLD
 
     def test_degree_gap_keeps_score(self, monkeypatch, tmp_path):
-        r = self._score(monkeypatch, tmp_path, [_req("MSc", "degree", "must_have", ["MSc"])])
+        r = self._score(monkeypatch, tmp_path, [_req("MSc", "degree", "must_have", ["MSc"])], body="MSc degree and Python")
         assert r["score"] >= config.FIT_SCORE_THRESHOLD  # a degree gap alone never drops a role
 
 
@@ -104,3 +104,19 @@ class TestKeywordsMustComeFromThePosting:
     def test_score_never_reaches_100(self):
         reqs = [_req("Python", "language", "must_have", ["Python"]), _req("SQL", "technology", "nice_to_have", ["SQL"])]
         assert rc.compute_score(reqs, CV + " SQL", "Python and SQL") <= 95
+
+
+class TestReasoning:
+    def test_breakdown_and_explanation_name_blocker_and_components(self):
+        reqs = [_req("Python", "language", "must_have", ["Python"]),
+                _req("AWS", "technology", "must_have", ["AWS"]),
+                _req("MSc", "degree", "must_have", ["MSc"]),
+                _req("SQL", "language", "nice_to_have", ["SQL"])]
+        post = "Python AWS MSc SQL"
+        bd = rc.score_breakdown(reqs, CV + " SQL", post)
+        assert (bd["skill_met"], bd["skill_total"], bd["nice_met"], bd["nice_total"]) == (1, 2, 1, 1)
+        assert bd["penalties"] == [{"requirement": "MSc", "points": 4}]
+        blockers, _ = rc.evaluate(reqs, CV + " SQL", post)
+        text = "\n".join(rc.explain(bd, blockers, 25, model_score=73))
+        assert "HARD BLOCKER" in text and "AWS" in text and "1/2" in text
+        assert "-4" in text and "capped" in text and "73" in text

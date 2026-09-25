@@ -11,6 +11,7 @@ from . import job_page_fetcher
 from . import llm_client
 from . import config
 from . import requirements_check
+from . import skill_lexicon
 
 logger = logging.getLogger(__name__)
 
@@ -188,8 +189,14 @@ def score_job_email(company: str, title: str, content: str) -> dict:
         title=title,
         content=job_page_fetcher.focus_description(content, config.DESCRIPTION_SCORE_CHARS),
     )
-    result = llm_client.call_json(prompt, num_predict=1500)  # raises on failure; caller decides retry behavior
-    return _apply_hard_requirement_cap(_apply_requirements_check(result, content))
+    result = llm_client.call_json(prompt, num_predict=1500, deterministic=True)  # raises on failure; caller decides retry behavior
+    result = _apply_hard_requirement_cap(_apply_requirements_check(result, content))
+    if result.get("score_breakdown"):
+        result["score_reasoning"] = requirements_check.explain(
+            result["score_breakdown"], result.get("hard_requirement_gaps") or [],
+            result.get("score", 0), result.get("model_score"),
+        )
+    return result
 
 
 def _cv_text() -> str:
@@ -203,17 +210,23 @@ def _cv_text() -> str:
 def _apply_requirements_check(result: dict, posting_text: str = "") -> dict:
     """Replaces the model's own opinion of blockers with the code-checked result: every
     required language/technology/domain is matched against the real CV text."""
-    reqs = result.get("requirements")
-    if not isinstance(reqs, list) or not reqs:
+    # Lexicon first (repeatable, never forgets a known term), LLM items only where they add
+    # something new.
+    reqs = skill_lexicon.merge_requirements(
+        skill_lexicon.extract_requirements(posting_text),
+        result.get("requirements") if isinstance(result.get("requirements"), list) else [],
+    )
+    if not reqs:
         return result
     cv = _cv_text()
     if not cv:
         return result
     blocking, other = requirements_check.evaluate(reqs, cv, posting_text)
-    computed = requirements_check.compute_score(reqs, cv, posting_text)
-    if computed is not None:
+    breakdown = requirements_check.score_breakdown(reqs, cv, posting_text)
+    if breakdown is not None:
         result["model_score"] = result.get("score")
-        result["score"] = computed
+        result["score"] = breakdown["score"]
+        result["score_breakdown"] = breakdown
     result["requirements_checked"] = requirements_check.annotate(reqs, cv, posting_text)
     result["hard_requirement_gaps"] = blocking
     result["must_have_gaps"] = blocking + other

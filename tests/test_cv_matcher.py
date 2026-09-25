@@ -76,7 +76,7 @@ class TestScoreJobEmailSanityGate:
         )
         result = cv_matcher.score_job_email("Acme", "Senior Engineer", real_content)
         assert called.get("yes") is True
-        assert result["score"] == 80
+        assert result["score"] >= 65  # score is now computed from requirements; must still pass
 
 
 class TestCitizenshipRestrictionGate:
@@ -118,7 +118,7 @@ class TestCitizenshipRestrictionGate:
         monkeypatch.setattr(llm_client, "call_json", _fake_call_json)
         monkeypatch.setattr(cv_matcher, "ensure_profile", lambda: {"skills": []})
         result = cv_matcher.score_job_email("Acme", "Senior Engineer", self._real_posting("Remote work available."))
-        assert result["score"] == 80
+        assert result["score"] >= 65
 
 
 class TestLlmClientDoesNotForceContextSize:
