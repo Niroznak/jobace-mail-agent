@@ -45,5 +45,10 @@ def job_id_for(company: str, title: str, position_id: str = "", requisition_id: 
     elif position_id.strip():
         key = f"pid:{position_id.strip().lower()}"
     else:
-        key = f"{company.strip().lower()}|{sheets_client.normalize_title(title)}"
+        # Real incident: "CaliAlfa" vs "CaliAlfa (Previously Alfabet)" -- the same
+        # employer extracted with a parenthetical aside two days apart -- hashed to two
+        # different keys because this tier used the raw company string, not the
+        # noise-stripped normalize_company() already used by find_row_by_company. The
+        # reply never matched the original row and opened a duplicate instead.
+        key = f"{sheets_client.normalize_company(company)}|{sheets_client.normalize_title(title)}"
     return hashlib.sha256(key.encode("utf-8")).hexdigest()[:12]

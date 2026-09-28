@@ -31,6 +31,11 @@ class TestNormalizeCompany:
         assert sc.normalize_company("") == ""
         assert sc.normalize_company("   ") == ""
 
+    def test_strips_parenthetical_rename_aside(self):
+        # Real bug: "CaliAlfa" (reply) vs "CaliAlfa (Previously Alfabet)" (original
+        # listing) hashed to different dedup keys and opened a duplicate row.
+        assert sc.normalize_company("CaliAlfa (Previously Alfabet)") == sc.normalize_company("CaliAlfa")
+
 
 class TestFindRowByCompanyAndTitle:
     ROWS = [

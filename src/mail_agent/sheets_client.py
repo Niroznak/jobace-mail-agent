@@ -105,8 +105,16 @@ _COMPANY_NOISE_WORDS = {
 }
 
 
+_COMPANY_PARENTHETICAL_RE = re.compile(r"\([^)]*\)")
+
+
 def normalize_company(name: str) -> str:
-    words = re.findall(r"[a-zA-Z0-9]+", (name or "").lower())
+    # Real incident: "CaliAlfa" vs "CaliAlfa (Previously Alfabet)" -- a parenthetical
+    # aside describing a rename -- hashed to different dedup keys and opened a duplicate
+    # row for a reply to an existing one. A parenthetical is always an aside about the
+    # name, never part of the name itself, so it's dropped before tokenizing.
+    name = _COMPANY_PARENTHETICAL_RE.sub(" ", name or "")
+    words = re.findall(r"[a-zA-Z0-9]+", name.lower())
     return " ".join(w for w in words if w not in _COMPANY_NOISE_WORDS)
 
 
