@@ -212,6 +212,30 @@ _BROWSER_HEADERS = {
     "Accept-Language": "en-US,en;q=0.9",
 }
 
+# Real incident: review_closed_positions.py's link-liveness sweep (one fetch per active
+# tracked row, ~100+ rows) hit HTTP 429/999 (LinkedIn's own "bot detected" code) 22 times
+# in a single run. Without a circuit breaker, EVERY remaining LinkedIn URL in that run
+# still burns 2 URL forms x 3 attempts x delays on a fetch that's already guaranteed to
+# fail once LinkedIn has flagged this IP/session -- wasting minutes and very likely
+# deepening the block. Once tripped, LinkedIn fetches are skipped outright (no network
+# call at all) for the rest of THIS process run; a fresh script invocation (each is its
+# own process) always gets a clean attempt again.
+_LINKEDIN_BACKOFF_SECONDS = 900  # 15 min -- comfortably longer than one run takes
+_linkedin_blocked_until = 0.0
+
+
+def _is_linkedin_host(url: str) -> bool:
+    try:
+        return "linkedin.com" in urllib.parse.urlsplit(url).netloc.lower()
+    except ValueError:
+        return False
+
+
+def linkedin_rate_limited() -> bool:
+    """True if LinkedIn has already rate-limited/blocked a fetch earlier in this run --
+    callers should skip further LinkedIn network calls entirely until this clears."""
+    return time.time() < _linkedin_blocked_until
+
 
 def _fetch_html(url: str) -> str | None:
     # A fuller header set (Accept/Accept-Language/Referer) and a referer matching the
@@ -232,6 +256,15 @@ def _fetch_html(url: str) -> str | None:
             return resp.read().decode("utf-8", errors="replace")
     except urllib.error.HTTPError as exc:
         logger.warning("HTTP %s fetching %s", exc.code, url)
+        if exc.code in (429, 999) and _is_linkedin_host(url):
+            global _linkedin_blocked_until
+            if not linkedin_rate_limited():
+                logger.error(
+                    "LinkedIn rate-limited this fetch (HTTP %s) -- skipping further LinkedIn "
+                    "fetches for the rest of this run (~%d min backoff).",
+                    exc.code, _LINKEDIN_BACKOFF_SECONDS // 60,
+                )
+            _linkedin_blocked_until = time.time() + _LINKEDIN_BACKOFF_SECONDS
         return None
     except (urllib.error.URLError, TimeoutError) as exc:
         logger.warning("Network error fetching %s: %s", url, exc)
@@ -255,6 +288,10 @@ def fetch_linkedin_posting(url: str) -> FetchedPosting:
     a fallback canonical URL are used before giving up -- this is content the
     recipient can see by clicking the link themselves, so a single failed attempt is
     not enough to give up."""
+    if linkedin_rate_limited():
+        logger.info("Skipping LinkedIn fetch (rate-limited earlier this run): %s", url)
+        return FetchedPosting()
+
     # Try the canonical /jobs/view/<id>/ form first: the raw tracking URL LinkedIn
     # puts in alert emails (/comm/jobs/view/...?trackingId=...) reliably serves a
     # different template with no description marker at all (verified empirically),
@@ -280,6 +317,11 @@ def fetch_linkedin_posting(url: str) -> FetchedPosting:
                     "Fetched %s (attempt %d/%d) but no description marker found (page length %d)",
                     candidate_url, attempt, _MAX_ATTEMPTS, len(html),
                 )
+            if linkedin_rate_limited():
+                # Tripped by this very attempt -- stop immediately instead of burning the
+                # remaining attempts/URL forms on a fetch that's now guaranteed to fail.
+                logger.info("LinkedIn rate limit hit mid-fetch, stopping remaining attempts for: %s", url)
+                return FetchedPosting()
             if attempt < _MAX_ATTEMPTS:
                 time.sleep(_RETRY_DELAY_SECONDS)
 

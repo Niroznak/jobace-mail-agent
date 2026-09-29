@@ -182,3 +182,50 @@ class TestExtractJobLinks:
         # invent candidates from a page with no real links.
         html = '<!DOCTYPE html><html><head><script src="/app.js"></script></head><body></body></html>'
         assert jpf.extract_job_links(html, "https://career.rafael.co.il/") == []
+
+
+class TestLinkedinRateLimitCircuitBreaker:
+    """Real incident: a single link-liveness sweep (review_closed_positions.py, one
+    fetch per active tracked row) hit HTTP 429/999 (LinkedIn's own bot-detected code)
+    22 times in one run -- every remaining LinkedIn URL still burned 2 URL forms x 3
+    attempts x delays on a fetch that was already guaranteed to fail."""
+
+    def setup_method(self):
+        jpf._linkedin_blocked_until = 0.0  # each test starts with a clean breaker
+
+    teardown_method = setup_method
+
+    def _raise_http_error(self, code):
+        import urllib.error
+
+        def _urlopen(req, timeout=None):
+            raise urllib.error.HTTPError(req.full_url, code, "blocked", {}, None)
+        return _urlopen
+
+    def test_429_trips_the_breaker(self, monkeypatch):
+        monkeypatch.setattr(jpf.urllib.request, "urlopen", self._raise_http_error(429))
+        assert jpf._fetch_html("https://www.linkedin.com/jobs/view/123/") is None
+        assert jpf.linkedin_rate_limited() is True
+
+    def test_999_trips_the_breaker(self, monkeypatch):
+        monkeypatch.setattr(jpf.urllib.request, "urlopen", self._raise_http_error(999))
+        assert jpf._fetch_html("https://www.linkedin.com/jobs/view/123/") is None
+        assert jpf.linkedin_rate_limited() is True
+
+    def test_non_linkedin_host_does_not_trip_the_breaker(self, monkeypatch):
+        monkeypatch.setattr(jpf.urllib.request, "urlopen", self._raise_http_error(429))
+        assert jpf._fetch_html("https://example.com/job/123") is None
+        assert jpf.linkedin_rate_limited() is False
+
+    def test_other_status_codes_do_not_trip_the_breaker(self, monkeypatch):
+        monkeypatch.setattr(jpf.urllib.request, "urlopen", self._raise_http_error(403))
+        assert jpf._fetch_html("https://www.linkedin.com/jobs/view/123/") is None
+        assert jpf.linkedin_rate_limited() is False
+
+    def test_tripped_breaker_skips_fetch_entirely_with_no_network_call(self, monkeypatch):
+        jpf._linkedin_blocked_until = jpf.time.time() + 900
+        called = []
+        monkeypatch.setattr(jpf.urllib.request, "urlopen", lambda *a, **k: called.append(1))
+        result = jpf.fetch_linkedin_posting("https://www.linkedin.com/comm/jobs/view/123/?trackingId=x")
+        assert result.description == "" and result.closed is False
+        assert called == []  # no network call was made at all
