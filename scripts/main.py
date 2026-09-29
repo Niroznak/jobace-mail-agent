@@ -8,6 +8,14 @@ which can be reproduced and fixed in isolation (see each stage's own docstring).
 Usage:
     python main.py             # real run: marks read, updates/appends sheet rows, notifies
     python main.py --dry-run   # logs intended actions only, no writes
+    python main.py --debug     # DEBUG logging + console summary of every candidate + why
+
+Every run also writes data/last_run_debug.json: one entry per candidate this run, with
+every log line its own processing produced (what was tried, which stage it reached, and
+the reasoning that stage logged) -- the fastest way to see why a given run did or didn't
+change the sheet, without scrolling the day's full log file. For debugging ONE specific
+message/posting in isolation (each pipeline stage run standalone, nothing written), see
+debug_pipeline.py.
 """
 from __future__ import annotations
 
@@ -22,6 +30,7 @@ from datetime import datetime
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "src"))
 
 from mail_agent import config
+from mail_agent import debug_report
 from mail_agent import gmail_client
 from mail_agent import notifier
 from mail_agent import sheets_client
@@ -36,20 +45,20 @@ from mail_agent.pipeline.types import Candidate
 logger = logging.getLogger(__name__)
 
 
-def setup_logging() -> None:
+def setup_logging(debug: bool = False) -> None:
     log_path = os.path.join(config.LOGS_DIR, f"agent_{datetime.now():%Y-%m-%d}.log")
     try:
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     except Exception:
         pass
     logging.basicConfig(
-        level=logging.INFO,
+        level=logging.DEBUG if debug else logging.INFO,
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
         handlers=[logging.FileHandler(log_path, encoding="utf-8"), logging.StreamHandler(sys.stdout)],
     )
 
 
-def run(dry_run: bool = False) -> bool:
+def run(dry_run: bool = False, debug: bool = False) -> bool:
     if not config.SHEET_ID:
         logger.error("config.SHEET_ID is not set. Set the JOBACE_SHEET_ID env var or edit config.py.")
         return False
@@ -117,47 +126,74 @@ def run(dry_run: bool = False) -> bool:
                 stopped_early = True
 
     stage_counts = Counter()
+    debug_records: list[dict] = []
     if not stopped_early:
         for c in all_candidates:
-            try:
-                if c.kind == "opportunity":
-                    verified = verify.verify_position(c, sheet_rows, retry_state)
-                    if verified is None:
-                        stage_counts["verify_failed"] += 1
-                        per_message_no_change.setdefault(c.mail_id, []).append(True)
-                        continue
-                    scored = score.score_position(verified)
-                    if scored is None:
-                        stage_counts["low_fit"] += 1
-                        per_message_no_change.setdefault(c.mail_id, []).append(True)
-                        continue
-                    result = reconcile.reconcile(scored, sheet_rows, sheets, dry_run)
-                else:
-                    result = reconcile.reconcile(c, sheet_rows, sheets, dry_run)
-                    if result.action == "ambiguous":
-                        ambiguous_count += 1
-                stage_counts[result.action] += 1
-                per_message_no_change.setdefault(c.mail_id, []).append(result.action not in ("inserted", "updated"))
-                consecutive_failures = 0
-            except Exception:
-                logger.exception(
-                    "[PIPELINE] Failed reconciling candidate mail=%s company=%r title=%r -> will retry next run",
-                    c.mail_id, c.company, c.title,
-                )
-                per_message_no_change.setdefault(c.mail_id, []).append(False)
-                consecutive_failures += 1
-                if consecutive_failures >= 3:
-                    logger.warning(
-                        "3 consecutive failures (Ollama unreachable or erroring) -> "
-                        "stopping this run early, remaining candidates will retry next cycle."
+            # Captures every log line this candidate's own processing emits (VERIFY/
+            # SCORE/RECONCILE already log their own reasoning) -- see debug_report.py.
+            # This is what answers "what did it try and why" without changing any
+            # stage's return type or grepping the raw log file for one candidate's story.
+            # No continue/break inside this block -- each branch falls through to the
+            # single record-append + stop-early check at the bottom so every candidate
+            # gets exactly one debug record regardless of which branch it took.
+            stop_now = False
+            with debug_report.LogCapture() as capture:
+                action = "error"
+                try:
+                    verified_ok = True
+                    if c.kind == "opportunity":
+                        verified = verify.verify_position(c, sheet_rows, retry_state)
+                        if verified is None:
+                            stage_counts["verify_failed"] += 1
+                            per_message_no_change.setdefault(c.mail_id, []).append(True)
+                            action = "verify_failed"
+                            verified_ok = False
+                        else:
+                            scored = score.score_position(verified)
+                            if scored is None:
+                                stage_counts["low_fit"] += 1
+                                per_message_no_change.setdefault(c.mail_id, []).append(True)
+                                action = "low_fit"
+                                verified_ok = False
+                    if verified_ok:
+                        if c.kind == "opportunity":
+                            result = reconcile.reconcile(scored, sheet_rows, sheets, dry_run)
+                        else:
+                            result = reconcile.reconcile(c, sheet_rows, sheets, dry_run)
+                            if result.action == "ambiguous":
+                                ambiguous_count += 1
+                        action = result.action
+                        stage_counts[result.action] += 1
+                        per_message_no_change.setdefault(c.mail_id, []).append(result.action not in ("inserted", "updated"))
+                        consecutive_failures = 0
+                except Exception:
+                    logger.exception(
+                        "[PIPELINE] Failed reconciling candidate mail=%s company=%r title=%r -> will retry next run",
+                        c.mail_id, c.company, c.title,
                     )
-                    stopped_early = True
-                    break
+                    per_message_no_change.setdefault(c.mail_id, []).append(False)
+                    consecutive_failures += 1
+                    if consecutive_failures >= 3:
+                        logger.warning(
+                            "3 consecutive failures (Ollama unreachable or erroring) -> "
+                            "stopping this run early, remaining candidates will retry next cycle."
+                        )
+                        stopped_early = True
+                        stop_now = True
+                debug_records.append({
+                    "mail_id": c.mail_id, "kind": c.kind, "source": c.source,
+                    "company": c.company, "title": c.title, "action": action, "log": capture.lines,
+                })
+            if stop_now:
+                break
 
     logger.info(
         "[PIPELINE] %d candidate(s) processed: %s", len(all_candidates),
         dict(stage_counts) if stage_counts else "(none reached verify/reconcile)",
     )
+    debug_report.write_report(config.RUN_DEBUG_REPORT_PATH, debug_records)
+    if debug:
+        debug_report.print_summary(debug_records)
 
     if not dry_run:
         state.save_pending_verification(retry_state)
@@ -193,9 +229,14 @@ def run(dry_run: bool = False) -> bool:
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Local Mail Agent batch run")
     parser.add_argument("--dry-run", action="store_true", help="Log intended actions without writing")
+    parser.add_argument(
+        "--debug", action="store_true",
+        help="DEBUG-level logging + a console summary of every candidate this run and why "
+             "it ended up where it did (also always written to data/last_run_debug.json)",
+    )
     args = parser.parse_args()
 
-    setup_logging()
+    setup_logging(debug=args.debug)
     # Real incident: two overlapping runs (manual + bat) raced on the same messages and
     # inserted every position twice. A lock file stops a second instance instead.
     lock_path = os.path.join(config.DATA_DIR, "main.lock")
@@ -208,7 +249,7 @@ if __name__ == "__main__":
         os.remove(lock_path)
         lock_fd = os.open(lock_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
     try:
-        run(dry_run=args.dry_run)
+        run(dry_run=args.dry_run, debug=args.debug)
     finally:
         os.close(lock_fd)
         os.remove(lock_path)

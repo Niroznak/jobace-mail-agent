@@ -33,6 +33,21 @@ _DESCRIPTION_PATTERNS = [
     re.compile(r'<section class="core-section-container[^>]*description[^>]*>(.*?)</section>', re.DOTALL),
 ]
 _JOB_ID_RE = re.compile(r"/jobs/view/(\d+)")
+_SHORT_URL_MAX_LEN = 90
+
+
+def short_url(url: str) -> str:
+    """Host + path only, no query string -- for log messages. Real problem this fixes:
+    LinkedIn/Indeed tracking links carry a query string that's often 500-1000+ chars
+    (trackingId/otpToken/etc.), so every fetch-related log line became a multi-line wall
+    of unreadable noise, burying the one thing worth reading (which posting, what
+    happened). The job/listing ID is what actually identifies a posting -- the tracking
+    junk after '?' never is."""
+    if not url:
+        return ""
+    parts = urllib.parse.urlsplit(url)
+    short = f"{parts.netloc}{parts.path}"
+    return short if len(short) <= _SHORT_URL_MAX_LEN else short[: _SHORT_URL_MAX_LEN - 3] + "..."
 _TAG_RE = re.compile(r"<[^>]+>")
 _FETCH_PACING_SECONDS = 2
 _TIMEOUT_SECONDS = 20
@@ -255,7 +270,7 @@ def _fetch_html(url: str) -> str | None:
         with urllib.request.urlopen(req, timeout=_TIMEOUT_SECONDS) as resp:
             return resp.read().decode("utf-8", errors="replace")
     except urllib.error.HTTPError as exc:
-        logger.warning("HTTP %s fetching %s", exc.code, url)
+        logger.warning("HTTP %s fetching %s", exc.code, short_url(url))
         if exc.code in (429, 999) and _is_linkedin_host(url):
             global _linkedin_blocked_until
             if not linkedin_rate_limited():
@@ -267,7 +282,7 @@ def _fetch_html(url: str) -> str | None:
             _linkedin_blocked_until = time.time() + _LINKEDIN_BACKOFF_SECONDS
         return None
     except (urllib.error.URLError, TimeoutError) as exc:
-        logger.warning("Network error fetching %s: %s", url, exc)
+        logger.warning("Network error fetching %s: %s", short_url(url), exc)
         return None
 
 
@@ -289,7 +304,7 @@ def fetch_linkedin_posting(url: str) -> FetchedPosting:
     recipient can see by clicking the link themselves, so a single failed attempt is
     not enough to give up."""
     if linkedin_rate_limited():
-        logger.info("Skipping LinkedIn fetch (rate-limited earlier this run): %s", url)
+        logger.info("Skipping LinkedIn fetch (rate-limited earlier this run): %s", short_url(url))
         return FetchedPosting()
 
     # Try the canonical /jobs/view/<id>/ form first: the raw tracking URL LinkedIn
@@ -315,17 +330,17 @@ def fetch_linkedin_posting(url: str) -> FetchedPosting:
                     return FetchedPosting(description=description, closed=closed)
                 logger.warning(
                     "Fetched %s (attempt %d/%d) but no description marker found (page length %d)",
-                    candidate_url, attempt, _MAX_ATTEMPTS, len(html),
+                    short_url(candidate_url), attempt, _MAX_ATTEMPTS, len(html),
                 )
             if linkedin_rate_limited():
                 # Tripped by this very attempt -- stop immediately instead of burning the
                 # remaining attempts/URL forms on a fetch that's now guaranteed to fail.
-                logger.info("LinkedIn rate limit hit mid-fetch, stopping remaining attempts for: %s", url)
+                logger.info("LinkedIn rate limit hit mid-fetch, stopping remaining attempts for: %s", short_url(url))
                 return FetchedPosting()
             if attempt < _MAX_ATTEMPTS:
                 time.sleep(_RETRY_DELAY_SECONDS)
 
-    logger.error("Exhausted all attempts and URL forms for job posting: %s", url)
+    logger.error("Exhausted all attempts and URL forms for job posting: %s", short_url(url))
     return FetchedPosting()
 
 

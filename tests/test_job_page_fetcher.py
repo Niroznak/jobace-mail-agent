@@ -229,3 +229,17 @@ class TestLinkedinRateLimitCircuitBreaker:
         result = jpf.fetch_linkedin_posting("https://www.linkedin.com/comm/jobs/view/123/?trackingId=x")
         assert result.description == "" and result.closed is False
         assert called == []  # no network call was made at all
+
+
+class TestShortUrl:
+    def test_strips_query_string_and_keeps_host_path(self):
+        url = "https://www.linkedin.com/comm/jobs/view/4445912160/?trackingId=abc123&refId=xyz789&lipi=urn%3Ali"
+        assert jpf.short_url(url) == "www.linkedin.com/comm/jobs/view/4445912160/"
+
+    def test_truncates_pathologically_long_paths(self):
+        url = "https://example.com/" + ("a" * 200)
+        result = jpf.short_url(url)
+        assert len(result) <= jpf._SHORT_URL_MAX_LEN and result.endswith("...")
+
+    def test_empty_url_returns_empty(self):
+        assert jpf.short_url("") == ""

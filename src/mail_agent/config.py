@@ -80,6 +80,11 @@ SKIPPED_DETAIL_PATH = os.path.join(DATA_DIR, "skipped_detail.jsonl")
 # HTTP 403). Distinct from SKIPPED_CANDIDATES_PATH, which is for postings that WERE scored
 # and fell below threshold. See state.log_dropped_verification.
 DROPPED_VERIFICATION_PATH = os.path.join(DATA_DIR, "dropped_verification.csv")
+# Per-run debug report: one JSON object per candidate, capturing every log line each
+# candidate produced while going through verify/score/reconcile -- i.e. exactly what was
+# tried and why, without needing to grep the day's full log. Overwritten every run (the
+# daily log file already keeps history); see debug_report.py.
+RUN_DEBUG_REPORT_PATH = os.path.join(DATA_DIR, "last_run_debug.json")
 GRAYED_JOB_IDS_PATH = os.path.join(DATA_DIR, "grayed_job_ids.json")
 SEEN_CAREER_POSTINGS_PATH = os.path.join(DATA_DIR, "seen_career_postings.json")
 # Retry-attempt tracking for stage 3 (verify) on a freshly-discovered opportunity
