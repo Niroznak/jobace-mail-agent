@@ -24,8 +24,10 @@ from .. import classifier
 from .. import config
 from .. import guardrails
 from .. import job_page_fetcher
+from .. import notifier
 from .. import position_resolver
 from .. import sheets_client
+from .. import state
 from . import dedup
 from .types import Candidate, VerifiedPosition
 
@@ -60,15 +62,27 @@ def pending_candidates(retry_state: dict) -> list[Candidate]:
     return [Candidate(**entry["candidate"]) for entry in retry_state.values()]
 
 
-def _give_up_or_retry(job_id: str, candidate: Candidate, retry_state: dict) -> bool:
+def _give_up_or_retry(job_id: str, candidate: Candidate, retry_state: dict, reason: str) -> bool:
     """Records a failed verification attempt for `job_id`, persisting the full
     candidate. Returns True if attempts are now exhausted (caller should drop this
     candidate entirely -- the entry is removed from retry_state either way in that
-    case)."""
+    case).
+
+    Real incident: a legitimate JLL posting failed to verify 3 times (Indeed's tracking
+    link returns HTTP 403 on every fetch attempt -- a real, live posting the fetcher
+    simply can't reach) and was silently dropped; it was only noticed because the user
+    happened to be watching the terminal log at that exact moment. A drop is now
+    surfaced two ways so it's reviewable later instead of visible only in that instant:
+    a toast notification, and an append-only CSV (state.log_dropped_verification)."""
     entry = retry_state.get(job_id) or {"attempts": 0, "candidate": dataclasses.asdict(candidate)}
     entry["attempts"] += 1
     if entry["attempts"] >= config.MAX_RESOLUTION_ATTEMPTS:
         retry_state.pop(job_id, None)
+        state.log_dropped_verification(candidate.company, candidate.title, candidate.url, reason, entry["attempts"])
+        notifier.notify_needs_review(
+            f"Could not verify, dropped: {candidate.company} - {candidate.title}. "
+            f"See data/dropped_verification.csv to check it manually."
+        )
         return True
     retry_state[job_id] = entry
     return False
@@ -101,7 +115,7 @@ def _verify_linkedin_digest(candidate: Candidate, sheet_rows: list[dict], retry_
         return None
     description = fetched.description
     if not description:
-        if _give_up_or_retry(pid_jid, candidate, retry_state):
+        if _give_up_or_retry(pid_jid, candidate, retry_state, "could not fetch job description"):
             logger.info("[VERIFY] '%s @ %s' -> giving up after %d attempts, dropping.", title, company, config.MAX_RESOLUTION_ATTEMPTS)
         else:
             logger.info("[VERIFY] '%s @ %s' -> could not fetch job description, will retry.", title, company)
@@ -218,7 +232,7 @@ def _verify_single_email(candidate: Candidate, sheet_rows: list[dict], retry_sta
     # than ever storing the raw email body as "description" -- see position_resolver.
     resolved = position_resolver.resolve_position(company, title, content)
     if not resolved.description:
-        if _give_up_or_retry(jid, candidate, retry_state):
+        if _give_up_or_retry(jid, candidate, retry_state, "could not verify a real posting description"):
             logger.info("[VERIFY] '%s @ %s' -> giving up after %d attempts, dropping.", title, company, config.MAX_RESOLUTION_ATTEMPTS)
         else:
             logger.info("[VERIFY] '%s @ %s' -> could not verify a real posting description, will retry.", title, company)

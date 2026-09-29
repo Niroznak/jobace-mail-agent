@@ -75,6 +75,11 @@ SKIPPED_CANDIDATES_PATH = os.path.join(DATA_DIR, "skipped_candidates.csv")
 # the requirement breakdown and reasoning, so a skip can be re-scored later even after the
 # posting's link is dead, and the scoring method itself can be validated against it.
 SKIPPED_DETAIL_PATH = os.path.join(DATA_DIR, "skipped_detail.jsonl")
+# Opportunities verify.py gave up on and dropped WITHOUT writing any row (never scored --
+# no usable description could be fetched at all, e.g. Indeed's tracking links returning
+# HTTP 403). Distinct from SKIPPED_CANDIDATES_PATH, which is for postings that WERE scored
+# and fell below threshold. See state.log_dropped_verification.
+DROPPED_VERIFICATION_PATH = os.path.join(DATA_DIR, "dropped_verification.csv")
 GRAYED_JOB_IDS_PATH = os.path.join(DATA_DIR, "grayed_job_ids.json")
 SEEN_CAREER_POSTINGS_PATH = os.path.join(DATA_DIR, "seen_career_postings.json")
 # Retry-attempt tracking for stage 3 (verify) on a freshly-discovered opportunity

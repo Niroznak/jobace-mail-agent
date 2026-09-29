@@ -139,6 +139,8 @@ class TestRetryAndGiveUp:
         monkeypatch.setattr(sheets_client, "active_rows", lambda rows: rows)
         monkeypatch.setattr(sheets_client, "find_row_by_job_id", lambda rows, jid: None)
         monkeypatch.setattr(position_resolver, "resolve_position", lambda company, title, content: position_resolver.ResolvedPosition())
+        monkeypatch.setattr(verify.state, "log_dropped_verification", lambda *a, **k: None)
+        monkeypatch.setattr(verify.notifier, "notify_needs_review", lambda *a, **k: None)
 
         retry_state: dict = {}
         candidate = _candidate(source="single_email")
@@ -146,6 +148,26 @@ class TestRetryAndGiveUp:
             verify.verify_position(candidate, [], retry_state)
         # Exhausted -- entry must be gone, never lingering as a permanent stub.
         assert retry_state == {}
+
+    def test_dropped_after_max_attempts_is_surfaced_not_silent(self, monkeypatch):
+        # Real incident: a legitimate JLL posting was silently dropped after 3 failed
+        # verification attempts and only noticed because the user was watching the
+        # terminal at that exact moment. A drop must now be logged AND notified.
+        from mail_agent import config
+        _allow_all_filters(monkeypatch)
+        monkeypatch.setattr(sheets_client, "active_rows", lambda rows: rows)
+        monkeypatch.setattr(sheets_client, "find_row_by_job_id", lambda rows, jid: None)
+        monkeypatch.setattr(position_resolver, "resolve_position", lambda company, title, content: position_resolver.ResolvedPosition())
+        logged, notified = {}, {}
+        monkeypatch.setattr(verify.state, "log_dropped_verification", lambda *a, **k: logged.update(args=a))
+        monkeypatch.setattr(verify.notifier, "notify_needs_review", lambda msg: notified.update(msg=msg))
+
+        retry_state: dict = {}
+        candidate = _candidate(source="single_email", company="JLL", title="Senior ML & LLM Platform Engineer")
+        for _ in range(config.MAX_RESOLUTION_ATTEMPTS):
+            verify.verify_position(candidate, [], retry_state)
+        assert logged["args"][:2] == ("JLL", "Senior ML & LLM Platform Engineer")
+        assert "JLL" in notified["msg"] and "dropped_verification.csv" in notified["msg"]
 
     def test_pending_candidates_reconstructs_from_state(self):
         candidate = _candidate(source="single_email", title="Reconstructed Role")

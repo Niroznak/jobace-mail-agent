@@ -78,6 +78,29 @@ def log_skipped_candidate(company: str, title: str, reason: str, score="", url: 
         })
 
 
+_DROPPED_FIELDNAMES = ["date", "company", "title", "url", "reason", "attempts"]
+
+
+def log_dropped_verification(company: str, title: str, url: str, reason: str, attempts: int) -> None:
+    """Recoverable record of an opportunity that verify.py gave up on after
+    config.MAX_RESOLUTION_ATTEMPTS and dropped WITHOUT writing any row (see verify.py's
+    module docstring) -- e.g. a real, live posting whose link a site like Indeed blocks
+    fetching from (HTTP 403 on every attempt). Real incident: a legitimate JLL posting
+    was dropped this way and only noticed because the user happened to be watching the
+    terminal at the moment it logged -- this file plus the toast notification
+    (notifier.notify_needs_review) are what let a drop be reviewed later instead of only
+    being visible in that instant. Append-only, never read by pipeline logic."""
+    file_exists = os.path.exists(config.DROPPED_VERIFICATION_PATH)
+    with open(config.DROPPED_VERIFICATION_PATH, "a", encoding="utf-8", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=_DROPPED_FIELDNAMES)
+        if not file_exists:
+            writer.writeheader()
+        writer.writerow({
+            "date": date.today().isoformat(), "company": company, "title": title,
+            "url": url, "reason": reason, "attempts": attempts,
+        })
+
+
 def log_skipped_detail(record: dict) -> None:
     """Append one JSON line with everything needed to re-score or audit a skipped
     candidate later: the exact text that was scored, the extracted requirements with CV

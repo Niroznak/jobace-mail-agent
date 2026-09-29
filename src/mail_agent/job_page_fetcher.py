@@ -206,9 +206,28 @@ def _clean_html(raw_html: str) -> str:
     return text.strip()
 
 
+_BROWSER_HEADERS = {
+    "User-Agent": _USER_AGENT,
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+    "Accept-Language": "en-US,en;q=0.9",
+}
+
+
 def _fetch_html(url: str) -> str | None:
+    # A fuller header set (Accept/Accept-Language/Referer) and a referer matching the
+    # link's own host cuts some bot-detection false positives, but this does NOT reliably
+    # unblock Indeed: its click-tracking redirects (cts.indeed.com/... and
+    # il.indeed.com/rc/clk/...) sit behind bot detection that a plain header change
+    # doesn't pass. That failure is structural, not a bug in this function -- see
+    # verify.py's give-up path, which now surfaces (not just logs) a drop instead of
+    # silently discarding it, since some of these are real, live postings.
+    headers = dict(_BROWSER_HEADERS)
     try:
-        req = urllib.request.Request(url, headers={"User-Agent": _USER_AGENT})
+        headers["Referer"] = f"{urllib.parse.urlsplit(url).scheme}://{urllib.parse.urlsplit(url).netloc}/"
+    except ValueError:
+        pass
+    try:
+        req = urllib.request.Request(url, headers=headers)
         with urllib.request.urlopen(req, timeout=_TIMEOUT_SECONDS) as resp:
             return resp.read().decode("utf-8", errors="replace")
     except urllib.error.HTTPError as exc:
