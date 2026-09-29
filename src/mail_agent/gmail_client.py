@@ -9,14 +9,10 @@ from datetime import datetime, timezone
 from email.header import decode_header
 from email.utils import parseaddr
 
-from google.auth.exceptions import RefreshError
-from google.auth.transport.requests import Request
-from google.oauth2.credentials import Credentials
-from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import Resource, build
 
 from . import config
-from . import notifier
+from . import oauth_helpers
 
 logger = logging.getLogger(__name__)
 
@@ -34,36 +30,11 @@ class EmailMessage:
 
 
 def get_gmail_service() -> Resource:
-    creds = None
-    if config.TOKEN_GMAIL_PATH and _path_exists(config.TOKEN_GMAIL_PATH):
-        creds = Credentials.from_authorized_user_file(config.TOKEN_GMAIL_PATH, config.GMAIL_SCOPES)
-    if not creds or not creds.valid:
-        if creds and creds.expired and creds.refresh_token:
-            try:
-                creds.refresh(Request())
-            except RefreshError:
-                # Silent failure here means the whole pipeline stops running with no
-                # visible sign until someone happens to notice stale data days later
-                # (this exact thing happened once already -- Google's "Testing"
-                # publish-status OAuth apps expire refresh tokens after 7 days).
-                notifier.notify_needs_review(
-                    "Gmail authorization expired -- run any script once interactively "
-                    "to reauthorize (a browser window will open)."
-                )
-                raise
-        else:
-            flow = InstalledAppFlow.from_client_secrets_file(
-                config.OAUTH_CLIENT_SECRET_PATH, config.GMAIL_SCOPES
-            )
-            creds = flow.run_local_server(port=0)
-        with open(config.TOKEN_GMAIL_PATH, "w", encoding="utf-8") as f:
-            f.write(creds.to_json())
+    # See oauth_helpers.get_credentials: an expired refresh token now self-heals by
+    # auto-opening the browser reauth flow (bounded by a timeout) instead of just
+    # notifying and crashing.
+    creds = oauth_helpers.get_credentials("Gmail", config.TOKEN_GMAIL_PATH, config.GMAIL_SCOPES)
     return build("gmail", "v1", credentials=creds)
-
-
-def _path_exists(path: str) -> bool:
-    import os
-    return os.path.exists(path)
 
 
 _MAX_PAGES_SAFETY_CAP = 20  # 20 x 100 = 2000 messages -- a runaway-query circuit breaker, not a real limit

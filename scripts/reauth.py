@@ -3,14 +3,18 @@
 Google's OAuth "Testing" publish status (the only realistic option here -- Gmail's
 modify scope is a RESTRICTED scope, and publishing to production with one requires a
 paid CASA security assessment meant for companies, not a personal single-user tool)
-expires refresh tokens after 7 days regardless of test-user status. When that happens,
-gmail_client/sheets_client raise RefreshError and fire a toast notification -- this
-script is the fix: it deletes both stale tokens and runs the interactive sign-in flow
-for each, so you approve access twice in one sitting instead of hitting the prompt
-piecemeal across separate scripts on different days.
+expires refresh tokens after 7 days regardless of test-user status. Normal runs now
+self-heal from this automatically (oauth_helpers.get_credentials auto-opens the browser
+reauth flow the moment a token has expired, bounded by a timeout so an unattended run
+doesn't hang forever). This script is for doing that proactively/deliberately instead of
+waiting for it to trigger mid-run -- e.g. right after the token-aging toast notification
+fires, or before heading somewhere without this machine for a week. It deletes both
+tokens and runs the interactive sign-in flow for each, so you approve access twice in
+one sitting.
 
 Usage:
     python reauth.py
+    (or double-click reauth.bat)
 """
 from __future__ import annotations
 

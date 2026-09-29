@@ -2,42 +2,21 @@
 from __future__ import annotations
 
 import logging
-import os
 import re
 
-from google.auth.exceptions import RefreshError
-from google.auth.transport.requests import Request
-from google.oauth2.credentials import Credentials
-from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import Resource, build
 
 from . import config
-from . import notifier
+from . import oauth_helpers
 
 logger = logging.getLogger(__name__)
 
 
 def get_sheets_service() -> Resource:
-    creds = None
-    if os.path.exists(config.TOKEN_SHEETS_PATH):
-        creds = Credentials.from_authorized_user_file(config.TOKEN_SHEETS_PATH, config.SHEETS_SCOPES)
-    if not creds or not creds.valid:
-        if creds and creds.expired and creds.refresh_token:
-            try:
-                creds.refresh(Request())
-            except RefreshError:
-                notifier.notify_needs_review(
-                    "Sheets authorization expired -- run any script once interactively "
-                    "to reauthorize (a browser window will open)."
-                )
-                raise
-        else:
-            flow = InstalledAppFlow.from_client_secrets_file(
-                config.OAUTH_CLIENT_SECRET_PATH, config.SHEETS_SCOPES
-            )
-            creds = flow.run_local_server(port=0)
-        with open(config.TOKEN_SHEETS_PATH, "w", encoding="utf-8") as f:
-            f.write(creds.to_json())
+    # See oauth_helpers.get_credentials: an expired refresh token now self-heals by
+    # auto-opening the browser reauth flow (bounded by a timeout) instead of just
+    # notifying and crashing.
+    creds = oauth_helpers.get_credentials("Sheets", config.TOKEN_SHEETS_PATH, config.SHEETS_SCOPES)
     return build("sheets", "v4", credentials=creds)
 
 
