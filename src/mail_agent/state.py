@@ -58,6 +58,21 @@ def save_seen_career_postings(seen: dict[str, list[str]]) -> None:
         json.dump(seen, f, indent=2, ensure_ascii=False)
 
 
+_FORMULA_LEAD_CHARS = ("=", "+", "-", "@", "\t", "\r")
+
+
+def _csv_safe(value) -> str:
+    """Neutralizes CSV/spreadsheet-formula injection: company/title/summary here come
+    straight from email content an attacker fully controls (e.g. a company name of
+    '=cmd|"/c calc"!A1'), and these files are meant to be opened in Excel/Sheets for
+    manual review. A cell whose text starts with =, +, -, @, tab or CR is executed as a
+    formula by Excel/Sheets/LibreOffice on open; prefixing it with a leading apostrophe
+    forces it to be read back as plain text instead, exactly as Excel's own CSV import
+    guards against this same class of attack."""
+    text = str(value) if value is not None else ""
+    return f"'{text}" if text.startswith(_FORMULA_LEAD_CHARS) else text
+
+
 _SKIPPED_FIELDNAMES = ["date", "company", "title", "reason", "score", "url", "summary"]
 
 
@@ -73,8 +88,8 @@ def log_skipped_candidate(company: str, title: str, reason: str, score="", url: 
         if not file_exists:
             writer.writeheader()
         writer.writerow({
-            "date": date.today().isoformat(), "company": company, "title": title,
-            "reason": reason, "score": score, "url": url, "summary": summary,
+            "date": date.today().isoformat(), "company": _csv_safe(company), "title": _csv_safe(title),
+            "reason": reason, "score": score, "url": _csv_safe(url), "summary": _csv_safe(summary),
         })
 
 
@@ -96,8 +111,8 @@ def log_dropped_verification(company: str, title: str, url: str, reason: str, at
         if not file_exists:
             writer.writeheader()
         writer.writerow({
-            "date": date.today().isoformat(), "company": company, "title": title,
-            "url": url, "reason": reason, "attempts": attempts,
+            "date": date.today().isoformat(), "company": _csv_safe(company), "title": _csv_safe(title),
+            "url": _csv_safe(url), "reason": reason, "attempts": attempts,
         })
 
 

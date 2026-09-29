@@ -15,6 +15,7 @@ import os
 from . import config
 from . import job_page_fetcher
 from . import notifier
+from . import state
 
 logger = logging.getLogger(__name__)
 
@@ -33,10 +34,15 @@ def load() -> list[dict]:
 
 
 def _save_all(rows: list[dict]) -> None:
+    # Row values can originate from extracted email content (attacker-controlled) and
+    # this CSV is meant to be opened directly in Excel/Sheets -- see state._csv_safe.
+    # Centralized here since every mutating path (append/update_link/update_notes)
+    # rewrites the whole file through this one function.
+    safe_rows = [{k: state._csv_safe(v) for k, v in row.items()} for row in rows]
     with open(config.TRACKED_COMPANIES_CSV, "w", encoding="utf-8", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=_FIELDNAMES)
         writer.writeheader()
-        writer.writerows(rows)
+        writer.writerows(safe_rows)
 
 
 def find(company: str) -> dict | None:
@@ -48,12 +54,17 @@ def find(company: str) -> dict | None:
 
 
 def append(company: str, notes: str, link: str) -> None:
+    # company/notes/link can originate from extracted email content (attacker-controlled)
+    # and this CSV is meant to be opened directly in Excel/Sheets -- see state._csv_safe.
     file_exists = os.path.exists(config.TRACKED_COMPANIES_CSV)
     with open(config.TRACKED_COMPANIES_CSV, "a", encoding="utf-8", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=_FIELDNAMES)
         if not file_exists:
             writer.writeheader()
-        writer.writerow({"Company Name": company, "Notes": notes, "Link": link})
+        writer.writerow({
+            "Company Name": state._csv_safe(company), "Notes": state._csv_safe(notes),
+            "Link": state._csv_safe(link),
+        })
     logger.info("[DIRECTORY] added %s -> %r", company, link)
 
 
