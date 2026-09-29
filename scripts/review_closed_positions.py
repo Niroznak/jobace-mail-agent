@@ -192,4 +192,5 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     setup_logging()
+    state.warn_if_tokens_aging()  # proactive heads-up before Google's ~7-day Testing expiry hits
     run(dry_run=args.dry_run)

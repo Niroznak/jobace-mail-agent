@@ -4,9 +4,37 @@ from __future__ import annotations
 import csv
 import json
 import os
+import time
 from datetime import date
 
 from . import config
+from . import notifier
+
+# Google's OAuth "Testing" publish status expires refresh tokens after ~7 days
+# regardless of test-user status; publishing to production requires a paid CASA
+# security assessment for gmail.modify (a RESTRICTED scope), which isn't realistic for
+# a personal single-user tool -- so this expiry is a fact of life, not a bug to fix.
+# Warn proactively a day or two ahead so re-auth (scripts/reauth.py) is a scheduled
+# 30-second task rather than a mid-run RefreshError crash discovered by surprise.
+_TOKEN_WARNING_AGE_DAYS = 5
+
+
+def warn_if_tokens_aging() -> None:
+    """Checks both OAuth token files' mtimes (proxy for when they were last (re)issued
+    -- Google's token JSON doesn't itself record the refresh token's issue date) and
+    fires one toast notification if either is old enough that the ~7-day expiry could
+    hit before the next scheduled run."""
+    stale = []
+    for label, path in (("Gmail", config.TOKEN_GMAIL_PATH), ("Sheets", config.TOKEN_SHEETS_PATH)):
+        if os.path.exists(path):
+            age_days = (time.time() - os.path.getmtime(path)) / 86400
+            if age_days >= _TOKEN_WARNING_AGE_DAYS:
+                stale.append(f"{label} ({age_days:.0f}d old)")
+    if stale:
+        notifier.notify_needs_review(
+            f"Google auth aging: {', '.join(stale)} -- run reauth.py soon before it "
+            f"expires (~7 days) and a scheduled run silently fails."
+        )
 
 
 def load_processed_ids() -> set[str]:
