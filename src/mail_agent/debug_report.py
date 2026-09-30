@@ -50,6 +50,41 @@ def write_report(path: str, records: list[dict]) -> None:
         json.dump(records, f, ensure_ascii=False, indent=2)
 
 
+_SYSTEMIC_MIN_ATTEMPTS = 3  # below this, a 100% failure rate is just small-sample noise
+
+
+def find_systemic_platform_failures(records: list[dict]) -> list[tuple[str, int, int]]:
+    """Detects a platform-wide block from this run's own candidates: e.g. every single
+    Indeed fetch failing is a fundamentally different situation from a few scattered
+    bad links -- it means "Indeed is blocking us right now", not "these specific
+    postings have issues", and deserves a distinct, louder alert (see main.py) instead
+    of blending into the routine per-candidate verify_failed count.
+
+    Returns (platform, failed_count, total_count) for each platform where every
+    opportunity candidate on that platform failed verification this run, requiring at
+    least _SYSTEMIC_MIN_ATTEMPTS candidates on that platform to rule out a false alarm
+    from a run that only touched one or two Indeed/LinkedIn postings."""
+    from . import job_page_fetcher  # deferred: keeps this module import-light for tests
+
+    totals: dict[str, int] = {}
+    failures: dict[str, int] = {}
+    for r in records:
+        if r.get("kind") != "opportunity" or not r.get("url"):
+            continue
+        platform = job_page_fetcher.classify_platform(r["url"])
+        if platform == "other":
+            continue
+        totals[platform] = totals.get(platform, 0) + 1
+        if r["action"] == "verify_failed":
+            failures[platform] = failures.get(platform, 0) + 1
+
+    return [
+        (platform, failures.get(platform, 0), total)
+        for platform, total in totals.items()
+        if total >= _SYSTEMIC_MIN_ATTEMPTS and failures.get(platform, 0) == total
+    ]
+
+
 def print_summary(records: list[dict]) -> None:
     """Concise, human-readable end-of-run table -- for --debug runs, printed to the
     console in addition to the JSON file, so the answer to "what happened and why" is

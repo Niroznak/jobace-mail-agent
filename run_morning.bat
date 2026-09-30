@@ -10,6 +10,14 @@ if %errorlevel%==0 (
     exit /b 0
 )
 
+REM Daily integrity check (liveness/completeness/duplicates) -- runs here, once a
+REM day, instead of on every frequent mail-scan cycle (see run_mail_agent.bat).
+python scripts\check_open_positions.py
+if errorlevel 1 (
+    echo [run_morning] check_open_positions.py FAILED, not marking morning flag.
+    exit /b 1
+)
+
 call run_mail_agent.bat
 if errorlevel 1 (
     echo [run_morning] run_mail_agent.bat FAILED, not marking morning flag.

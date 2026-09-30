@@ -54,3 +54,41 @@ class TestPrintSummary:
         ])
         out = capsys.readouterr().out
         assert "verify_failed" in out and "inserted" in out and "Role A" in out
+
+
+class TestFindSystemicPlatformFailures:
+    def _rec(self, url, action):
+        return {"kind": "opportunity", "url": url, "action": action, "title": "T", "company": "C", "log": []}
+
+    def test_flags_platform_where_every_attempt_failed(self):
+        records = [self._rec(f"https://www.linkedin.com/jobs/view/{i}/", "verify_failed") for i in range(3)]
+        result = debug_report.find_systemic_platform_failures(records)
+        assert result == [("linkedin", 3, 3)]
+
+    def test_does_not_flag_when_some_succeed(self):
+        records = [self._rec("https://www.linkedin.com/jobs/view/1/", "verify_failed"),
+                   self._rec("https://www.linkedin.com/jobs/view/2/", "verify_failed"),
+                   self._rec("https://www.linkedin.com/jobs/view/3/", "inserted")]
+        assert debug_report.find_systemic_platform_failures(records) == []
+
+    def test_requires_minimum_sample_size(self):
+        # 1/1 failed is just an unlucky single posting, not evidence of a platform block.
+        records = [self._rec("https://www.linkedin.com/jobs/view/1/", "verify_failed")]
+        assert debug_report.find_systemic_platform_failures(records) == []
+
+    def test_ignores_non_platform_hosts(self):
+        records = [self._rec(f"https://example.com/job/{i}", "verify_failed") for i in range(5)]
+        assert debug_report.find_systemic_platform_failures(records) == []
+
+    def test_ignores_reply_candidates(self):
+        records = [{"kind": "reply", "url": "https://www.linkedin.com/jobs/view/1/",
+                    "action": "verify_failed", "title": "T", "company": "C", "log": []}] * 3
+        assert debug_report.find_systemic_platform_failures(records) == []
+
+    def test_tracks_multiple_platforms_independently(self):
+        records = (
+            [self._rec(f"https://www.linkedin.com/jobs/view/{i}/", "verify_failed") for i in range(3)]
+            + [self._rec(f"https://il.indeed.com/rc/clk/dl?jk={i}", "inserted") for i in range(3)]
+        )
+        result = debug_report.find_systemic_platform_failures(records)
+        assert result == [("linkedin", 3, 3)]

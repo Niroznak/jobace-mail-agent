@@ -240,10 +240,27 @@ _linkedin_blocked_until = 0.0
 
 
 def _is_linkedin_host(url: str) -> bool:
+    return classify_platform(url) == "linkedin"
+
+
+# Known job-board hosts whose fetch failures are worth telling apart from a random
+# company career page -- a systemic block on one of these (see main.py's end-of-run
+# systemic-failure check) means "this platform is down for us", not "a few bad links".
+_PLATFORM_HOSTS = {"linkedin": "linkedin.com", "indeed": "indeed.com"}
+
+
+def classify_platform(url: str) -> str:
+    """'linkedin' / 'indeed' / 'other' by host -- used to tell a genuine platform-wide
+    block (e.g. every Indeed fetch this run failed) apart from ordinary scattered
+    failures, which need very different responses (wait it out vs. nothing to do)."""
     try:
-        return "linkedin.com" in urllib.parse.urlsplit(url).netloc.lower()
+        host = urllib.parse.urlsplit(url).netloc.lower()
     except ValueError:
-        return False
+        return "other"
+    for name, marker in _PLATFORM_HOSTS.items():
+        if marker in host:
+            return name
+    return "other"
 
 
 def linkedin_rate_limited() -> bool:

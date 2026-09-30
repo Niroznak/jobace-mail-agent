@@ -23,13 +23,13 @@ onboarding and as interview material.
 
 ## Architecture
 
-![Pipeline diagram: Gmail feeds main.py, which calls a local Ollama LLM to classify email and score CV fit, verifies the posting via position_resolver, validates it through guardrails.py, and writes it to the Google Sheet via position_sheet.py, with notifier.py firing toasts. review_closed_positions.py, validate_sheet.py, and the optional scan_career_pages.py run around the same sheet. Everything except the Gmail/Sheets API calls stays on your machine, at zero cost.](docs/pipeline-diagram.svg)
+![Pipeline diagram: Gmail feeds main.py, which calls a local Ollama LLM to classify email and score CV fit, verifies the posting via position_resolver, validates it through guardrails.py, and writes it to the Google Sheet via position_sheet.py, with notifier.py firing toasts. check_open_positions.py (daily integrity check) and the optional scan_career_pages.py run around the same sheet. Everything except the Gmail/Sheets API calls stays on your machine, at zero cost.](docs/pipeline-diagram.svg)
 
 ### Repo layout
 
 ```
 src/mail_agent/   importable library code (config, classifier, sheets_client, ...)
-scripts/          runnable entry points (main.py, review_closed_positions.py, ...)
+scripts/          runnable entry points (main.py, check_open_positions.py, ...)
 tests/            pytest suite -- conftest.py puts both of the above on sys.path
 *.bat             Windows entry points; invoke scripts as `python scripts\<name>.py`
 ```
@@ -40,30 +40,39 @@ works from a fresh clone with just `pip install -r requirements.txt`.
 
 ### The pipeline
 
-Independent scripts, chained in `run_mail_agent.bat`, each idempotent and safe
-to run alone:
+Two independent scripts on two different schedules:
 
 ```
-scripts/review_closed_positions.py  →  scripts/main.py  →  scripts/validate_sheet.py
-   stage 1: gray out stale rows      stages 2-5: scan mail    stage 6: audit for gaps
+scripts/check_open_positions.py  (once/day, via run_morning.bat)
+scripts/main.py                  (every ~10 min, via run_mail_agent.bat)
 ```
 
-1. **`review_closed_positions.py`** — re-checks every tracked, still-open row's
-   link. If the posting now shows a "no longer accepting applications" banner (or,
-   for a company-listings-page link, the title has simply dropped off the current
-   listings), the row's status is set to `closed` and its text grayed out — never
-   deleted. Also auto-deprioritizes (`status → nr`) any row that's sat at a
-   pre-application status for `config.STALE_NOT_APPLIED_DAYS` (21) or more —
-   a priority judgment call, not confirmation the posting is gone, so it uses `nr`
-   (keeps blocking a resurfaced duplicate) rather than `closed` (would treat a
-   resurfaced duplicate as new). Rows already in
+1. **`check_open_positions.py`** — the daily integrity check over every tracked,
+   still-open row: liveness, completeness, and duplicates, merged into one report
+   (this used to be three separately-run, overlapping scripts —
+   `review_closed_positions.py`, `validate_sheet.py`, and a manual audit — folded
+   into one). If a posting now shows a "no longer accepting applications" banner
+   (or, for a company-listings-page link, the title has simply dropped off the
+   current listings), the row's status is set to `closed` and its text grayed
+   out — never deleted. Also auto-deprioritizes (`status → nr`) any row that's
+   sat at a pre-application status for `config.STALE_NOT_APPLIED_DAYS` (21) or
+   more — a priority judgment call, not confirmation the posting is gone, so it
+   uses `nr` (keeps blocking a resurfaced duplicate) rather than `closed` (would
+   treat a resurfaced duplicate as new). Rows already in
    `interview`/`offer`/`applied`/`rejected` are never touched by either check
    (`sheets_client.is_eligible_for_closure` only considers a row still
    `""`/`"not applied yet"`) -- a posting going dead or stale doesn't erase real
-   pipeline history. Runs **first**, before any mail is even fetched, so stage 2's
-   dedup always works against a freshly-cleaned active set and a stale posting is
-   never mistaken for a live one.
-2. **`main.py`** — orchestrates stages 2-5, each a separately-tested module in
+   pipeline history. It also flags any row still missing company/title, any
+   active row stuck with no url/description, and any group of active rows that
+   resolve to the same dedup key (a duplicate). Report-only for completeness/
+   duplicates (never edits those); liveness/staleness findings do write
+   `closed`/`nr`, same as before. **Runs once a day**, not every cycle — a real
+   incident this fixes: running its liveness re-fetch (one network call per open
+   row) on every ~10-minute cycle is what tripped LinkedIn's own bot-detection
+   (HTTP 429/999) 22 times in a single run. Once a day cuts that request volume
+   by roughly two orders of magnitude.
+2. **`main.py`** — the frequent cycle: fetch new mail, then orchestrates stages
+   2-5, each a separately-tested module in
    `src/mail_agent/pipeline/` with its own typed input/output, so a bug is always
    attributable to exactly one stage:
    - **extract** (`pipeline/extract.py`) — turns one fetched email into a list of
@@ -86,11 +95,6 @@ scripts/review_closed_positions.py  →  scripts/main.py  →  scripts/validate_
      source (digest, generic digest, single email) through the same functions --
      the fix for 5 former near-duplicate write sites each getting some detail
      slightly wrong.
-3. **`validate_sheet.py`** — post-run audit: flags (never edits) any row still
-   missing company/title, or an active row stuck with no url/description past
-   `MAX_RESOLUTION_ATTEMPTS`, so gaps surface in one summary notification instead
-   of a manual sheet read-through.
-
 `backfill_career_links.py` (retrofits rows with no `url`/`description` by
 searching the company's career page) and `scan_career_pages.py` (proactively
 scans career pages for new postings, run separately via `run_morning.bat`) both
@@ -119,7 +123,7 @@ also commented out of `run_mail_agent.bat` pending a fix to that matching logic.
 | `pipeline/dedup.py` | `job_id_for` (multi-tier dedup key) and `next_status` (status-transition rules) -- shared by `verify.py`/`reconcile.py`, re-exported from `main.py` for backward compatibility. |
 | `pipeline/extract.py`, `verify.py`, `score.py`, `reconcile.py` | Stages 2-5 (see above). |
 | `main.py` | Thin orchestrator: fetch mail, run every candidate through extract → verify → score → reconcile, handle per-message read-marking and the 3-consecutive-failure circuit breaker. |
-| `review_closed_positions.py`, `validate_sheet.py` | The other two active pipeline scripts (see above). |
+| `check_open_positions.py` | The daily integrity-check script (see above). |
 | `backfill_career_links.py`, `scan_career_pages.py` | Career-site search scripts, currently disabled/unwired pending a matching-accuracy fix (see above). |
 | `morning_flag.py` | Dedup flag so the "morning" scheduled task only actually runs once per day even if Task Scheduler's sleep-catchup and a normal firing both land the same morning. |
 
@@ -281,7 +285,7 @@ happy-path case, e.g.:
 | `test_job_page_fetcher.py` | Closed-posting detection, script/style HTML stripping, the exact-phrase snippet match (and its single-word false-positive guard) |
 | `test_main.py` | `job_id_for`'s key-priority rules, `next_status` transitions |
 | `test_guardrails.py` | Identity-completeness checks, LLM-plausibility checks, and the reply-target row-matching tiers (single row, conflicting title, ambiguous multiple) -- every write path's "is this safe, and is it the right row?" logic |
-| `test_validate_sheet.py` | The post-run audit correctly skips already-terminal (closed/nr) rows instead of re-flagging them forever |
+| `test_check_open_positions.py` | The daily integrity check correctly skips already-terminal (closed/nr) rows instead of re-flagging them forever, plus duplicate-group detection |
 | `test_cv_matcher.py` | The code-enforced hard-requirement score cap |
 | `test_company_directory.py` | CSV read/write, and — the highest-value case — that a failed search is genuinely never retried more than once |
 
@@ -385,8 +389,9 @@ Once that succeeds:
 python scripts/main.py
 ```
 
-or double-click [run_mail_agent.bat](run_mail_agent.bat) (runs
-`review_closed_positions.py` → `main.py` → `validate_sheet.py`;
+or double-click [run_mail_agent.bat](run_mail_agent.bat) (runs `main.py` only —
+the daily integrity check, `check_open_positions.py`, runs separately once a
+day via `run_morning.bat`, not on this every-cycle path; see above for why.
 `backfill_career_links.py` is currently commented out there pending a fix to
 its career-site title-matching accuracy).
 
@@ -418,7 +423,7 @@ disable location filtering entirely.
 | `FIT_SCORE_THRESHOLD` | Minimum CV-fit score to surface a job |
 | `HARD_REQUIREMENT_SCORE_CAP` | Score ceiling when a hard, unmet requirement is found |
 | `MAX_RESOLUTION_ATTEMPTS` | Retries before giving up on an unresolvable position (dropped entirely for a fresh discovery; marks `nr` for a reply-derived row) |
-| `STALE_NOT_APPLIED_DAYS` | Days at a pre-application status before `review_closed_positions.py` auto-marks a row `nr` |
+| `STALE_NOT_APPLIED_DAYS` | Days at a pre-application status before `check_open_positions.py` auto-marks a row `nr` |
 | `CV_TEXT_PATH` | Path to your plain-text CV |
 | `OLLAMA_HOST` / `OLLAMA_MODEL` | Local LLM used for classification/scoring |
 | `TRACKED_COMPANIES_CSV` | Self-healing company → career-page directory |

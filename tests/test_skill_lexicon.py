@@ -12,7 +12,11 @@ def _by_text(reqs):
 def test_finds_cloud_and_industrial_terms_the_llm_used_to_miss():
     post = "Requirements:\n- Experience with AWS or Azure cloud services\n- Knowledge of OPC UA, PLCs and SCADA systems"
     got = _by_text(lx.extract_requirements(post))
-    assert {"AWS", "Azure", "OPC UA", "PLC", "SCADA"} <= set(got)
+    # "AWS or Azure" is a genuine either/or -> one grouped requirement (any one
+    # satisfies it). "OPC UA, PLCs and SCADA" has no "or" -> three separate
+    # requirements (a comma/"and" list means know all of them, not any one).
+    assert "AWS / Azure" in got
+    assert {"OPC UA", "PLC", "SCADA"} <= set(got)
     assert all(r["necessity"] == "must_have" for r in got.values())
 
 
@@ -53,3 +57,16 @@ def test_merge_drops_llm_items_the_lexicon_already_covers_and_keeps_new_ones():
            {"text": "Wafer metrology", "kind": "domain", "necessity": "must_have", "any_of": ["metrology"]}]
     merged = lx.merge_requirements(lex, llm)
     assert [r["text"] for r in merged] == ["Python", "Wafer metrology"]
+
+
+def test_non_language_alternatives_group_too():
+    # Real bug: "AWS or GCP required" scored both as independent hard blockers instead
+    # of one either/or -- found while testing scripts/score_pasted_posting.py.
+    got = lx.extract_requirements("Requirements:\n- AWS or GCP cloud experience required")
+    assert len(got) == 1 and got[0]["kind"] == "technology"
+    assert rc.evaluate(got, "Experience with GCP and Python", "AWS or GCP")[0] == []
+
+
+def test_comma_only_list_without_or_stays_separate_requirements():
+    got = lx.extract_requirements("Requirements:\n- Docker, Kubernetes and Terraform experience")
+    assert {r["text"] for r in got} == {"Docker", "Kubernetes", "Terraform"}

@@ -243,3 +243,19 @@ class TestShortUrl:
 
     def test_empty_url_returns_empty(self):
         assert jpf.short_url("") == ""
+
+
+class TestClassifyPlatform:
+    def test_linkedin_host(self):
+        assert jpf.classify_platform("https://www.linkedin.com/jobs/view/123/") == "linkedin"
+        assert jpf.classify_platform("https://www.linkedin.com/comm/jobs/view/123/?trackingId=x") == "linkedin"
+
+    def test_indeed_host(self):
+        assert jpf.classify_platform("https://il.indeed.com/rc/clk/dl?jk=1") == "indeed"
+        assert jpf.classify_platform("https://cts.indeed.com/v3/abc") == "indeed"
+
+    def test_other_host(self):
+        assert jpf.classify_platform("https://example.com/careers/123") == "other"
+
+    def test_malformed_url_is_other(self):
+        assert jpf.classify_platform("not a url") == "other"

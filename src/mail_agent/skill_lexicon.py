@@ -96,7 +96,11 @@ _MUST_HEADING = re.compile(
     r"^[ \t]*(?:requirements?|(?:minimum|basic|key|required)[ \t]+qualifications?|qualifications?|"
     r"what[ \t]+we(?:'|’)?re[ \t]+looking[ \t]+for|who[ \t]+you[ \t]+are|responsibilit\w*|job[ \t]+description)[^\n]{0,40}$",
     re.IGNORECASE)
-_ALT_SEPARATORS = re.compile(r"\bor\b|/|,|\band/or\b", re.IGNORECASE)
+# Requires an explicit "or" -- a bare comma/slash enumeration ("OPC UA, PLCs and
+# SCADA") is too ambiguous to treat as alternatives: for tools/technologies that's
+# usually "know all of these", not "any one of these" (unlike a comma-then-"or"
+# language list, e.g. "Python, C++ or Java", which "or" still catches).
+_ALT_SEPARATORS = re.compile(r"\bor\b|\band/or\b", re.IGNORECASE)
 
 
 def _norm(text: str) -> str:
@@ -118,8 +122,12 @@ def extract_requirements(text: str) -> list[dict]:
     """Requirements the lexicon finds in `text`, in the same shape the LLM extraction
     produces: {text, kind, necessity, any_of}. Necessity comes from the nearest section
     heading (Preferred/Advantage -> nice_to_have) or an inline cue on the same line.
-    Several languages on one line joined by 'or' / '/' / ',' are ONE requirement with
-    alternatives (any one satisfies it), e.g. "Python, C++ or Java"."""
+    Several terms of the SAME kind on one line joined by 'or' / '/' / ',' are ONE
+    requirement with alternatives (any one satisfies it), e.g. "Python, C++ or Java"
+    or "AWS or GCP cloud experience required" -- not two independent hard blockers.
+    Real bug this fixes: "AWS or GCP required" scored both as separate must-haves,
+    so having neither one (a false blocker) counted the same as failing both halves
+    of a genuine either/or, capping the score far harder than the posting intended."""
     section_nice = False
     merged: dict[str, dict] = {}
     for raw in (text or "").split("\n"):
@@ -137,17 +145,24 @@ def extract_requirements(text: str) -> list[dict]:
         if not terms:
             continue
         nice = section_nice or bool(_NICE_CUES.search(line))
-        langs = [c for c, k in terms if k == "language"]
-        group = langs if len(langs) > 1 and _ALT_SEPARATORS.search(line) else []
+        has_alt_separator = bool(_ALT_SEPARATORS.search(line))
+        groups_by_kind: dict[str, list[str]] = {}
+        if has_alt_separator:
+            by_kind: dict[str, list[str]] = {}
+            for canonical, kind in terms:
+                by_kind.setdefault(kind, []).append(canonical)
+            groups_by_kind = {k: v for k, v in by_kind.items() if len(v) > 1}
+        grouped_canonicals = {c for group in groups_by_kind.values() for c in group}
         for canonical, kind in terms:
-            key = "|".join(sorted(group)) if canonical in group else canonical
+            group = groups_by_kind.get(kind, []) if canonical in grouped_canonicals else []
+            key = "|".join(sorted(group)) if group else canonical
             level = "nice_to_have" if nice else "must_have"
             existing = merged.get(key)
             if existing:
                 if level == "must_have":  # a must-have mention anywhere wins
                     existing["necessity"] = "must_have"
                 continue
-            if canonical in group:
+            if group:
                 any_of = sorted({s for c in group for s in LEXICON[c][1]})
                 label = " / ".join(sorted(group))
             else:

@@ -117,11 +117,13 @@ GOOGLE_SEARCH_API_KEY = os.environ.get("GOOGLE_SEARCH_API_KEY", "")
 GOOGLE_SEARCH_CX = os.environ.get("GOOGLE_SEARCH_CX", "")
 
 # --- Resolution retry ---
-# A gapped row (blank url/description) gets retried by backfill_career_links.py on
-# every scheduled run; after this many failed attempts it's marked "nr" instead of
-# retried forever -- avoids indefinitely re-hitting a company career page that
-# genuinely doesn't have the position, or a link that turned out unusable.
-MAX_RESOLUTION_ATTEMPTS = 3
+# A freshly-discovered opportunity whose posting page couldn't be fetched this run
+# (verify.py) is retried on the next run; after this many run-level attempts it's
+# dropped entirely -- never written, not even as a placeholder (see verify.py's module
+# docstring) -- rather than retried indefinitely. Tuned to 2 (try once more next run,
+# then give up) per explicit user policy: don't keep re-attempting a link that's
+# still blocked, and don't leave a half-verified row sitting in the sheet either way.
+MAX_RESOLUTION_ATTEMPTS = 2
 
 # A tracked position still sitting at "not applied yet" (or blank) this long after
 # being saved is deprioritized automatically -- marked "nr", not "closed": this is

@@ -181,7 +181,7 @@ def run(dry_run: bool = False, debug: bool = False) -> bool:
                         stopped_early = True
                         stop_now = True
                 debug_records.append({
-                    "mail_id": c.mail_id, "kind": c.kind, "source": c.source,
+                    "mail_id": c.mail_id, "kind": c.kind, "source": c.source, "url": c.url,
                     "company": c.company, "title": c.title, "action": action, "log": capture.lines,
                 })
             if stop_now:
@@ -194,6 +194,13 @@ def run(dry_run: bool = False, debug: bool = False) -> bool:
     debug_report.write_report(config.RUN_DEBUG_REPORT_PATH, debug_records)
     if debug:
         debug_report.print_summary(debug_records)
+    for platform, failed, total in debug_report.find_systemic_platform_failures(debug_records):
+        summary = (
+            f"SYSTEMIC FAILURE: all {failed}/{total} {platform} fetch(es) failed this run -- "
+            f"likely a platform-wide block (see data/last_run_debug.json), not isolated bad links."
+        )
+        logger.error("[SYSTEMIC] %s", summary)
+        notifier.notify_needs_review(summary)
 
     if not dry_run:
         state.save_pending_verification(retry_state)
