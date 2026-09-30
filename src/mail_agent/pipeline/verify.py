@@ -21,6 +21,7 @@ import dataclasses
 import logging
 
 from .. import classifier
+from .. import company_directory
 from .. import config
 from .. import guardrails
 from .. import job_page_fetcher
@@ -88,9 +89,26 @@ def _give_up_or_retry(job_id: str, candidate: Candidate, retry_state: dict, reas
     return False
 
 
+def _ensure_company_tracked(company: str) -> None:
+    """Best-effort, fire-and-forget: if this company isn't in tracked_companies.csv
+    yet, look up (and cache) its career page so scan_career_pages.py's daily sweep
+    picks it up going forward -- growing that channel's coverage automatically from
+    every company a LinkedIn/Indeed digest ever names, even the ones whose specific
+    posting we can't currently fetch (see config.AUTO_DISCOVER_CAREER_PAGES). Never
+    allowed to affect this candidate's own verify outcome."""
+    if not config.AUTO_DISCOVER_CAREER_PAGES or not company.strip():
+        return
+    try:
+        if company_directory.find(company) is None:
+            company_directory.get_career_link(company)
+    except Exception:
+        logger.warning("[DIRECTORY] auto-discovery failed for %r, will retry next time.", company, exc_info=True)
+
+
 def verify_position(candidate: Candidate, sheet_rows: list[dict], retry_state: dict) -> VerifiedPosition | None:
     if not _passes_early_filters(candidate):
         return None
+    _ensure_company_tracked(candidate.company)
     if candidate.source == "linkedin_digest":
         return _verify_linkedin_digest(candidate, sheet_rows, retry_state)
     if candidate.source == "generic_digest":

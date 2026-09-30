@@ -99,7 +99,13 @@ def update_notes(company: str, notes: str) -> None:
 
 
 def is_link_usable(link: str, company: str) -> bool:
-    if not link.strip():
+    # Real incident: "Ethosia" -> a news article on an Israeli tech site, because the
+    # article happened to mention the company by name -- the company-name-in-content
+    # check alone is trivially satisfied by a news article, an about-us page, a
+    # Wikipedia entry, anything discussing the company at all. Also requiring the URL
+    # itself to look like a careers page (see _looks_like_career_url) rules those out,
+    # the same fix already applied to the search-result text-match fallback below.
+    if not link.strip() or not _looks_like_career_url(link):
         return False
     posting = job_page_fetcher.fetch_generic_posting(link)
     if not posting.description:
@@ -112,6 +118,25 @@ def _is_aggregator(url: str) -> bool:
     return any(domain == d or domain.endswith("." + d) for d in _AGGREGATOR_DOMAINS)
 
 
+# Real bug: the fallback below used to accept ANY search result whose title/snippet
+# merely mentioned the company -- since the query is always "<company> careers", that
+# matched almost every result, including a third-party company-profile/database site
+# with zero actual job listings (confirmed case: "Mentee Robotics" -> kmeans.io/company/
+# mentee-robotics, which even 402'd on fetch and still got accepted and written to
+# tracked_companies.csv). A URL is only accepted on the text-match fallback when its
+# own path/domain also looks like an actual careers page -- text mentioning the company
+# is necessary but nowhere near sufficient.
+_CAREER_URL_MARKERS = (
+    "career", "jobs", "join-us", "join_us", "work-with-us", "opportunities",
+    "greenhouse.io", "lever.co", "workday", "taleo", "icims", "smartrecruiters",
+    "comeet", "jobvite", "breezy.hr", "ashbyhq.com", "recruitee.com",
+)
+
+
+def _looks_like_career_url(url: str) -> bool:
+    return any(marker in url.lower() for marker in _CAREER_URL_MARKERS)
+
+
 def _pick_from_results(results: list, company: str) -> str | None:
     company_lower = company.strip().lower()
     for r in results:
@@ -122,9 +147,11 @@ def _pick_from_results(results: list, company: str) -> str | None:
         # Plain fetch came back empty -- likely a JS-rendered page (confirmed case:
         # career.rafael.co.il serves an empty bot-protection shell to non-browser
         # clients). The search engine's own crawler already rendered and indexed it,
-        # so its title/snippet is a real, non-fabricated signal we can use instead
-        # of giving up on an otherwise-correct search hit.
-        if company_lower in (r.title + " " + r.snippet).lower():
+        # so its title/snippet is a real, non-fabricated signal -- but ONLY once the
+        # URL itself also looks like a careers page (see _looks_like_career_url);
+        # otherwise this fallback accepts nearly any page that just mentions the
+        # company, which is not evidence it's their career page.
+        if _looks_like_career_url(r.url) and company_lower in (r.title + " " + r.snippet).lower():
             return r.url
     return None
 

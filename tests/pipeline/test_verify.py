@@ -2,6 +2,7 @@
 dedup lookups, job_page_fetcher, and position_resolver; no network/Ollama calls.
 """
 from mail_agent import classifier
+from mail_agent import company_directory
 from mail_agent import job_page_fetcher
 from mail_agent import position_resolver
 from mail_agent import sheets_client
@@ -202,3 +203,63 @@ def test_teaser_length_snippet_is_not_scored(monkeypatch):
     monkeypatch.setattr(verify.job_page_fetcher, "fetch_generic_posting", lambda url: verify.job_page_fetcher.FetchedPosting())
     result = verify.verify_position(_candidate(source="generic_digest", snippet="x" * 160, url="https://il.indeed.com/rc/clk/dl?jk=1"), [], {})
     assert result is None
+
+
+class TestEnsureCompanyTracked:
+    """Real motivation: LinkedIn/Indeed digests name companies whose SPECIFIC posting
+    we currently can't fetch (platform blocks), but the company NAME itself is free --
+    auto-discovering and caching that company's career page grows
+    scan_career_pages.py's coverage independent of whether this candidate's own
+    posting ever verifies."""
+
+    def test_looks_up_and_caches_a_company_not_yet_tracked(self, monkeypatch):
+        from mail_agent import config
+        monkeypatch.setattr(config, "AUTO_DISCOVER_CAREER_PAGES", True)
+        monkeypatch.setattr(company_directory, "find", lambda c: None)
+        called = {}
+        monkeypatch.setattr(company_directory, "get_career_link", lambda c: called.setdefault("company", c))
+        verify._ensure_company_tracked("New Company")
+        assert called["company"] == "New Company"
+
+    def test_does_not_re_lookup_an_already_tracked_company(self, monkeypatch):
+        from mail_agent import config
+        monkeypatch.setattr(config, "AUTO_DISCOVER_CAREER_PAGES", True)
+        monkeypatch.setattr(company_directory, "find", lambda c: {"Company Name": c})
+        called = []
+        monkeypatch.setattr(company_directory, "get_career_link", lambda c: called.append(c))
+        verify._ensure_company_tracked("Already Tracked Co")
+        assert called == []
+
+    def test_disabled_by_config_does_nothing(self, monkeypatch):
+        from mail_agent import config
+        monkeypatch.setattr(config, "AUTO_DISCOVER_CAREER_PAGES", False)
+        called = []
+        monkeypatch.setattr(company_directory, "find", lambda c: (_ for _ in ()).throw(AssertionError("should not be called")))
+        monkeypatch.setattr(company_directory, "get_career_link", lambda c: called.append(c))
+        verify._ensure_company_tracked("Some Co")
+        assert called == []
+
+    def test_a_lookup_failure_never_raises(self, monkeypatch):
+        from mail_agent import config
+        monkeypatch.setattr(config, "AUTO_DISCOVER_CAREER_PAGES", True)
+        monkeypatch.setattr(company_directory, "find", lambda c: None)
+        def _raise(c):
+            raise RuntimeError("search API down")
+        monkeypatch.setattr(company_directory, "get_career_link", _raise)
+        verify._ensure_company_tracked("Flaky Co")  # must not raise
+
+    def test_blank_company_is_skipped(self, monkeypatch):
+        from mail_agent import config
+        monkeypatch.setattr(config, "AUTO_DISCOVER_CAREER_PAGES", True)
+        monkeypatch.setattr(company_directory, "find", lambda c: (_ for _ in ()).throw(AssertionError("should not be called")))
+        verify._ensure_company_tracked("   ")
+
+    def test_verify_position_calls_ensure_company_tracked(self, monkeypatch):
+        _allow_all_filters(monkeypatch)
+        called = []
+        monkeypatch.setattr(verify, "_ensure_company_tracked", lambda c: called.append(c))
+        monkeypatch.setattr(sheets_client, "active_rows", lambda rows: rows)
+        monkeypatch.setattr(sheets_client, "find_row_by_job_id", lambda rows, jid: None)
+        monkeypatch.setattr(job_page_fetcher, "fetch_linkedin_posting", lambda url: job_page_fetcher.FetchedPosting())
+        verify.verify_position(_candidate(source="linkedin_digest", company="Some New Co"), [], {})
+        assert called == ["Some New Co"]

@@ -4,6 +4,7 @@ Network calls (job_page_fetcher.search_duckduckgo, is_link_usable) are mocked --
 these tests verify the caching/state-machine logic, not real web search.
 """
 from mail_agent import company_directory as cd
+from mail_agent import job_page_fetcher
 
 
 def use_temp_csv(tmp_path, monkeypatch):
@@ -101,3 +102,63 @@ class TestGetCareerLinkSearchIsOneTimeOnly:
         assert link == "https://fresh-link.example"
         # repaired in place, not duplicated
         assert cd.find("StaleCo")["Link"] == "https://fresh-link.example"
+
+
+class TestPickFromResultsRejectsNonCareerUrls:
+    """Real incident: the text-match fallback accepted a third-party company-profile
+    site (kmeans.io/company/mentee-robotics -- not the company's own career page, and
+    it 402'd on fetch) purely because its title/snippet mentioned the company name --
+    which the query "<company> careers" makes true of almost any result."""
+
+    def _result(self, url, title, snippet):
+        return job_page_fetcher.SearchResult(url=url, title=title, snippet=snippet)
+
+    def test_rejects_a_company_profile_site_with_no_career_url_markers(self, monkeypatch):
+        monkeypatch.setattr(cd, "is_link_usable", lambda url, company: False)
+        results = [self._result(
+            "https://www.kmeans.io/company/mentee-robotics",
+            "Mentee Robotics - Company Profile", "Mentee Robotics careers and funding info",
+        )]
+        assert cd._pick_from_results(results, "Mentee Robotics") is None
+
+    def test_accepts_unfetchable_page_when_url_looks_like_a_real_career_page(self, monkeypatch):
+        # The case this fallback exists for: a real JS-rendered career page that a
+        # plain fetch can't read, but whose URL is unambiguously a careers page.
+        monkeypatch.setattr(cd, "is_link_usable", lambda url, company: False)
+        results = [self._result(
+            "https://career.example.com/careers/mentee-robotics",
+            "Mentee Robotics Careers", "Join the Mentee Robotics team",
+        )]
+        assert cd._pick_from_results(results, "Mentee Robotics") == "https://career.example.com/careers/mentee-robotics"
+
+    def test_known_ats_domain_counts_as_a_career_url(self, monkeypatch):
+        monkeypatch.setattr(cd, "is_link_usable", lambda url, company: False)
+        results = [self._result(
+            "https://boards.greenhouse.io/menteerobotics",
+            "Mentee Robotics", "Open positions at Mentee Robotics",
+        )]
+        assert cd._pick_from_results(results, "Mentee Robotics") is not None
+
+    def test_a_confirmed_fetch_still_wins_regardless_of_url_shape(self, monkeypatch):
+        monkeypatch.setattr(cd, "is_link_usable", lambda url, company: True)
+        results = [self._result("https://example.com/anything", "t", "s")]
+        assert cd._pick_from_results(results, "Acme") == "https://example.com/anything"
+
+
+class TestIsLinkUsableRequiresCareerUrl:
+    """Real incident: "Ethosia" -> a news article on calcalistech.com that merely
+    mentioned the company by name passed the old check (company name found in fetched
+    content) even though it's not a career page at all."""
+
+    def test_rejects_content_match_on_a_non_career_url(self, monkeypatch):
+        monkeypatch.setattr(job_page_fetcher, "fetch_generic_posting",
+                             lambda url: job_page_fetcher.FetchedPosting(description="All about Ethosia, a great startup."))
+        assert not cd.is_link_usable("https://www.calcalistech.com/ctechnews/article/sk7fnlaa2", "Ethosia")
+
+    def test_accepts_content_match_on_a_real_career_url(self, monkeypatch):
+        monkeypatch.setattr(job_page_fetcher, "fetch_generic_posting",
+                             lambda url: job_page_fetcher.FetchedPosting(description="Join the Ethosia team. Open roles below."))
+        assert cd.is_link_usable("https://ethosia.com/careers", "Ethosia")
+
+    def test_blank_link_is_never_usable(self):
+        assert not cd.is_link_usable("", "Ethosia")

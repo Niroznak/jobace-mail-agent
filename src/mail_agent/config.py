@@ -155,6 +155,16 @@ MAIL_LOOKBACK_DAYS = 3
 # a company-directory career-page guess.
 ENABLE_CAREER_SITE_SEARCH = False
 
+# Separate, safe half of the same idea: when a new opportunity candidate names a
+# company not yet in tracked_companies.csv, look up (and cache) its career page --
+# NOT resolve/verify any specific posting from it (that's the risky, disabled half
+# above). This is what feeds scan_career_pages.py's daily discovery sweep, and it
+# works even while LinkedIn/Indeed block fetching the specific posting, since it
+# only needs the company NAME the digest email already gave us for free. Bounded
+# cost: one search per genuinely new company ever seen (see
+# company_directory.NO_LINK_FOUND_MARKER -- a failed lookup is cached, never retried).
+AUTO_DISCOVER_CAREER_PAGES = True
+
 # Gmail label applied by a separate Apps Script (running natively in Gmail every 15
 # min on a broad job-related keyword match) -- the local agent only scans this label
 # instead of the whole inbox, which keeps each run's volume small. Whether the mail
