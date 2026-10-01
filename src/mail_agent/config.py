@@ -85,6 +85,15 @@ DROPPED_VERIFICATION_PATH = os.path.join(DATA_DIR, "dropped_verification.csv")
 # tried and why, without needing to grep the day's full log. Overwritten every run (the
 # daily log file already keeps history); see debug_report.py.
 RUN_DEBUG_REPORT_PATH = os.path.join(DATA_DIR, "last_run_debug.json")
+# Staging for list_pending_positions.py's human-opens-link workflow: one row per
+# blocked-platform candidate that couldn't be auto-resolved via a company career page,
+# keyed by job_id so re-running the list doesn't repeat something already shown,
+# resolved, or determined low-fit. Status: "unprocessed" (still worth showing) ->
+# "resolved" (you opened it, it scored and was written) or "skipped_low_fit" (you
+# opened it, score.score_position said no) or "auto_resolved" (never needed you at
+# all -- position_resolver.find_on_career_page found it). Distinct from
+# pending_verification.json, which is the fully-automated retry-then-drop path.
+PENDING_MANUAL_LINKS_PATH = os.path.join(DATA_DIR, "pending_manual_links.csv")
 GRAYED_JOB_IDS_PATH = os.path.join(DATA_DIR, "grayed_job_ids.json")
 SEEN_CAREER_POSTINGS_PATH = os.path.join(DATA_DIR, "seen_career_postings.json")
 # Retry-attempt tracking for stage 3 (verify) on a freshly-discovered opportunity

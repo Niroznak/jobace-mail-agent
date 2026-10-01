@@ -166,3 +166,42 @@ def log_skipped_detail(record: dict) -> None:
     record = {"date": date.today().isoformat(), **record}
     with open(config.SKIPPED_DETAIL_PATH, "a", encoding="utf-8") as f:
         f.write(json.dumps(record, ensure_ascii=False) + "\n")
+
+
+_PENDING_MANUAL_FIELDNAMES = ["job_id", "company", "title", "url", "status", "date_listed", "date_resolved"]
+
+
+def load_pending_manual_links() -> dict[str, dict]:
+    """job_id -> row, for list_pending_positions.py's staging file."""
+    if not os.path.exists(config.PENDING_MANUAL_LINKS_PATH):
+        return {}
+    with open(config.PENDING_MANUAL_LINKS_PATH, encoding="utf-8", newline="") as f:
+        return {row["job_id"]: row for row in csv.DictReader(f) if row.get("job_id")}
+
+
+def save_pending_manual_links(rows: dict[str, dict]) -> None:
+    with open(config.PENDING_MANUAL_LINKS_PATH, "w", encoding="utf-8", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=_PENDING_MANUAL_FIELDNAMES)
+        writer.writeheader()
+        for row in rows.values():
+            writer.writerow({k: _csv_safe(row.get(k, "")) for k in _PENDING_MANUAL_FIELDNAMES})
+
+
+def upsert_pending_manual_link(job_id: str, company: str, title: str, url: str, status: str) -> None:
+    """Add a new unprocessed entry, or update an existing one's status (resolved /
+    skipped_low_fit / auto_resolved) -- read-modify-write, since this file is small
+    and only touched by on-demand, human-paced tools, never the frequent scheduled
+    cycle."""
+    rows = load_pending_manual_links()
+    existing = rows.get(job_id)
+    today = date.today().isoformat()
+    if existing:
+        existing["status"] = status
+        if status != "unprocessed":
+            existing["date_resolved"] = today
+    else:
+        rows[job_id] = {
+            "job_id": job_id, "company": _csv_safe(company), "title": _csv_safe(title), "url": _csv_safe(url),
+            "status": status, "date_listed": today, "date_resolved": today if status != "unprocessed" else "",
+        }
+    save_pending_manual_links(rows)

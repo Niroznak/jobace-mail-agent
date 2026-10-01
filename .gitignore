@@ -25,6 +25,10 @@ tasks/todo.md
 # Your own CV text -- point CV_TEXT_PATH (config.py) at wherever you keep this.
 cv.txt
 
+# Output of list_pending_positions.py --html -- real company names, titles, and
+# LinkedIn/Indeed tracking links, meant to be opened locally in Chrome, not committed.
+pending_positions.html
+
 # Ad-hoc debug/scratch dumps from past investigations -- real sheet rows, LinkedIn
 # tracking URLs, and application data landed in these at the repo root over time.
 # They're personal data, not source, and were never meant to be committed.

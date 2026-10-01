@@ -62,3 +62,38 @@ class TestCsvSafe:
 
     def test_handles_none(self):
         assert state._csv_safe(None) == ""
+
+
+class TestPendingManualLinks:
+    def test_round_trip_empty(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(config, "PENDING_MANUAL_LINKS_PATH", str(tmp_path / "pending.csv"))
+        assert state.load_pending_manual_links() == {}
+
+    def test_upsert_new_entry_defaults_to_given_status(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(config, "PENDING_MANUAL_LINKS_PATH", str(tmp_path / "pending.csv"))
+        state.upsert_pending_manual_link("abc123", "Acme", "Engineer", "https://x.com/1", "unprocessed")
+        rows = state.load_pending_manual_links()
+        assert rows["abc123"]["status"] == "unprocessed"
+        assert rows["abc123"]["company"] == "Acme"
+        assert rows["abc123"]["date_resolved"] == ""
+
+    def test_upsert_existing_entry_updates_status_and_sets_resolved_date(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(config, "PENDING_MANUAL_LINKS_PATH", str(tmp_path / "pending.csv"))
+        state.upsert_pending_manual_link("abc123", "Acme", "Engineer", "https://x.com/1", "unprocessed")
+        state.upsert_pending_manual_link("abc123", "Acme", "Engineer", "https://x.com/1", "resolved")
+        rows = state.load_pending_manual_links()
+        assert rows["abc123"]["status"] == "resolved"
+        assert rows["abc123"]["date_resolved"] != ""
+
+    def test_csv_injection_in_company_name_is_neutralized(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(config, "PENDING_MANUAL_LINKS_PATH", str(tmp_path / "pending.csv"))
+        state.upsert_pending_manual_link("abc123", "=cmd|'/c calc'!A1", "Engineer", "https://x.com/1", "unprocessed")
+        rows = state.load_pending_manual_links()
+        assert rows["abc123"]["company"].startswith("'")
+
+    def test_two_distinct_job_ids_both_persist(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(config, "PENDING_MANUAL_LINKS_PATH", str(tmp_path / "pending.csv"))
+        state.upsert_pending_manual_link("a", "Acme", "Engineer A", "https://x.com/1", "unprocessed")
+        state.upsert_pending_manual_link("b", "Beta", "Engineer B", "https://x.com/2", "unprocessed")
+        rows = state.load_pending_manual_links()
+        assert set(rows.keys()) == {"a", "b"}
