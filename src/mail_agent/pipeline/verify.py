@@ -35,7 +35,7 @@ logger = logging.getLogger(__name__)
 
 
 def _passes_early_filters(candidate: Candidate) -> bool:
-    """The four checks every opportunity candidate must pass regardless of source,
+    """The five checks every opportunity candidate must pass regardless of source,
     applied uniformly here instead of duplicated per-source (that duplication is
     exactly how a nav-link "Open Positions" title reached one source but not
     another, this session)."""
@@ -47,6 +47,9 @@ def _passes_early_filters(candidate: Candidate) -> bool:
         return False
     if classifier.is_junior_or_intern_title(title):
         logger.info("[VERIFY] '%s @ %s' -> junior/intern/student title, not relevant.", title, company)
+        return False
+    if classifier.is_title_domain_mismatch(title):
+        logger.info("[VERIFY] '%s @ %s' -> different discipline/function, not relevant.", title, company)
         return False
     if classifier.is_location_excluded(candidate.location):
         logger.info("[VERIFY] '%s @ %s' -> location '%s' not commutable, not relevant.", title, company, candidate.location)

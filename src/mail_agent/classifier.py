@@ -415,14 +415,43 @@ def confirm_company_name(page_text: str, guessed_company: str) -> str:
 
 
 # junior/intern/student-level roles are never relevant regardless of fit score.
+# Real incident: "Software Engineer - New College Grad" was not caught by this list
+# and had to be manually opened (via the human-opens-link workflow) before being
+# recognized as a junior role -- "new grad"/"new college grad" added.
 _JUNIOR_TITLE_RE = re.compile(
-    r"\b(intern(?:ship)?|junior|jr\.?|student|entry[\s-]?level|co-?op|apprentice|trainee|working student)\b",
+    r"\b(intern(?:ship)?|junior|jr\.?|student|entry[\s-]?level|co-?op|apprentice|trainee|"
+    r"working student|new (?:college )?grad(?:uate)?|recent graduate)\b",
     re.IGNORECASE,
 )
 
 
 def is_junior_or_intern_title(title: str) -> bool:
     return bool(_JUNIOR_TITLE_RE.search(title or ""))
+
+
+# Role CATEGORIES structurally outside this CV's domain (data science/ML/software),
+# regardless of fit score or company -- a different engineering discipline (chip
+# physical design/layout, pure hardware architecture) or non-technical function
+# (vendor/procurement management, marketing) that LinkedIn/Indeed's recommendation
+# surfaced anyway (often just company/keyword overlap, e.g. "AI" in the company's
+# own branding). Real incident: 8 titles ("Physical Design for PPA Optimization
+# Engineer", "Senior Analog Layout Design Engineer", "Senior Engineering Vendor
+# Manager", "Senior Campaign Specialist", etc.) all had to be manually opened via the
+# human-opens-link workflow before being recognized as clearly irrelevant -- wasted
+# effort this filter exists to avoid. Deliberately narrow and literal (same
+# word-boundary-regex philosophy as _JUNIOR_TITLE_RE), grown from real observed
+# false negatives rather than guessed broadly, to avoid rejecting a genuinely
+# relevant role that happens to share a word.
+_DOMAIN_MISMATCH_TITLE_RE = re.compile(
+    r"\b(physical design|analog layout|layout design|soc product|package layout|"
+    r"vendor manage(?:r|ment)|procurement|supply chain manager|"
+    r"campaign specialist|hardware architect)\b",
+    re.IGNORECASE,
+)
+
+
+def is_title_domain_mismatch(title: str) -> bool:
+    return bool(_DOMAIN_MISMATCH_TITLE_RE.search(title or ""))
 
 
 def is_location_excluded(location: str) -> bool:

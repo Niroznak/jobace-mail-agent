@@ -19,6 +19,7 @@ def _candidate(**overrides) -> Candidate:
 def _allow_all_filters(monkeypatch):
     monkeypatch.setattr(classifier, "is_platform_company_name", lambda c: False)
     monkeypatch.setattr(classifier, "is_junior_or_intern_title", lambda t: False)
+    monkeypatch.setattr(classifier, "is_title_domain_mismatch", lambda t: False)
     monkeypatch.setattr(classifier, "is_location_excluded", lambda loc: False)
 
 
@@ -42,8 +43,16 @@ class TestEarlyFilters:
     def test_excluded_location_is_rejected(self, monkeypatch):
         monkeypatch.setattr(classifier, "is_platform_company_name", lambda c: False)
         monkeypatch.setattr(classifier, "is_junior_or_intern_title", lambda t: False)
+        monkeypatch.setattr(classifier, "is_title_domain_mismatch", lambda t: False)
         monkeypatch.setattr(classifier, "is_location_excluded", lambda loc: True)
         result = verify.verify_position(_candidate(location="Jerusalem"), [], {})
+        assert result is None
+
+    def test_domain_mismatch_title_is_rejected(self, monkeypatch):
+        monkeypatch.setattr(classifier, "is_platform_company_name", lambda c: False)
+        monkeypatch.setattr(classifier, "is_junior_or_intern_title", lambda t: False)
+        monkeypatch.setattr(classifier, "is_title_domain_mismatch", lambda t: True)
+        result = verify.verify_position(_candidate(title="Senior Analog Layout Design Engineer"), [], {})
         assert result is None
 
 

@@ -49,9 +49,43 @@ class TestIsJuniorOrInternTitle:
     def test_does_not_flag_senior_roles(self):
         assert not classifier.is_junior_or_intern_title("Senior Backend Engineer")
 
+    def test_flags_new_grad_variants(self):
+        # Real incident: "Software Engineer - New College Grad" was missed and had
+        # to be manually opened before being recognized as junior.
+        assert classifier.is_junior_or_intern_title("Software Engineer - New College Grad")
+        assert classifier.is_junior_or_intern_title("New Grad Software Engineer")
+        assert classifier.is_junior_or_intern_title("Recent Graduate Program")
+
     def test_does_not_false_positive_on_substring(self):
         # "jr" as a whole word only -- must not match inside unrelated words.
         assert not classifier.is_junior_or_intern_title("Major Account Manager")
+
+
+class TestIsTitleDomainMismatch:
+    """Real incident: 8 titles from a different engineering discipline (chip physical
+    design/layout, pure hardware architecture) or non-technical function (vendor
+    management, marketing) all had to be manually opened via the human-opens-link
+    workflow before being recognized as clearly irrelevant to a data science/ML/
+    software CV."""
+
+    def test_flags_chip_physical_design_and_layout_roles(self):
+        assert classifier.is_title_domain_mismatch("Physical Design for PPA Optimization Engineer")
+        assert classifier.is_title_domain_mismatch("Senior Analog Layout Design Engineer")
+        assert classifier.is_title_domain_mismatch("Package Layout Design Engineer")
+        assert classifier.is_title_domain_mismatch("Senior SoC Product Engineer")
+
+    def test_flags_vendor_management_and_procurement(self):
+        assert classifier.is_title_domain_mismatch("Senior Engineering Vendor Manager")
+        assert classifier.is_title_domain_mismatch("Senior Manager, Engineering Vendor Management")
+
+    def test_flags_marketing_and_pure_hardware_architecture(self):
+        assert classifier.is_title_domain_mismatch("Senior Campaign Specialist")
+        assert classifier.is_title_domain_mismatch("Senior Hardware Architect")
+
+    def test_does_not_flag_relevant_software_ml_titles(self):
+        assert not classifier.is_title_domain_mismatch("Senior Data Scientist")
+        assert not classifier.is_title_domain_mismatch("Machine Learning Engineer")
+        assert not classifier.is_title_domain_mismatch("Senior Software Architect")  # "software", not "hardware"
 
 
 class TestIsLocationExcluded:
