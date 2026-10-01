@@ -157,13 +157,13 @@ def _apply_status_signal(sheets, matched_row: dict, candidate: Candidate, dry_ru
 
 
 def _flag_ambiguous(candidate: Candidate, candidates: list[dict]) -> None:
+    # No per-item toast here -- main.py counts ambiguous results across the whole run
+    # and fires ONE consolidated [RUN SUMMARY] notification at the end instead (real
+    # incident: 3 ambiguous Mercor updates in one run used to fire 3 separate toasts
+    # here PLUS a 4th summary toast from main.py for the same issue).
     row_numbers = [c["_row"] for c in candidates]
     logger.warning(
         "[RECONCILE] [NEEDS REVIEW] '%s' status signal (title=%r, signal=%s) matches %d tracked rows for this "
         "company (rows %s) -- ambiguous, not auto-applying. Update manually.",
         candidate.company, candidate.title, candidate.status_signal, len(candidates), row_numbers,
-    )
-    notifier.notify_needs_review(
-        f"Ambiguous status update for {candidate.company} ({candidate.status_signal}) -- "
-        f"matches rows {row_numbers}, please update manually."
     )

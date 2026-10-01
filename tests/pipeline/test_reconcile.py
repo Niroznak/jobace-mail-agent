@@ -65,15 +65,15 @@ class TestReconcileReplySingleEmail:
         assert matched["status"] == "applied"  # in-memory mirror updated too
 
     def test_ambiguous_match_is_flagged_not_guessed(self, monkeypatch):
+        # No per-item toast expected here anymore -- main.py consolidates all
+        # ambiguous results across a run into one end-of-run notification instead
+        # (real incident: 3 ambiguous updates in one run used to fire 4 toasts total).
         candidates = [{"_row": 1}, {"_row": 2}]
         monkeypatch.setattr(guardrails, "resolve_reply_target_row", lambda rows, company, title: (None, candidates, ""))
-        notified = {}
-        monkeypatch.setattr(notifier, "notify_needs_review", lambda msg: notified.setdefault("msg", msg))
 
         result = reconcile.reconcile(_reply(), [], sheets=object(), dry_run=False)
 
         assert result.action == "ambiguous"
-        assert "msg" in notified
 
     def test_unmatched_and_creation_allowed_creates_new_row(self, monkeypatch):
         monkeypatch.setattr(guardrails, "resolve_reply_target_row", lambda rows, company, title: (None, [], ""))

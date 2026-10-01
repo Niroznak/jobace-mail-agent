@@ -124,15 +124,20 @@ def log_skipped_candidate(company: str, title: str, reason: str, score="", url: 
 _DROPPED_FIELDNAMES = ["date", "company", "title", "url", "reason", "attempts"]
 
 
+_dropped_this_process: list[tuple[str, str]] = []
+
+
 def log_dropped_verification(company: str, title: str, url: str, reason: str, attempts: int) -> None:
     """Recoverable record of an opportunity that verify.py gave up on after
     config.MAX_RESOLUTION_ATTEMPTS and dropped WITHOUT writing any row (see verify.py's
     module docstring) -- e.g. a real, live posting whose link a site like Indeed blocks
     fetching from (HTTP 403 on every attempt). Real incident: a legitimate JLL posting
     was dropped this way and only noticed because the user happened to be watching the
-    terminal at the moment it logged -- this file plus the toast notification
-    (notifier.notify_needs_review) are what let a drop be reviewed later instead of only
-    being visible in that instant. Append-only, never read by pipeline logic."""
+    terminal at the moment it logged -- this file is what lets a drop be reviewed later
+    instead of only being visible in that instant. Append-only, never read by pipeline
+    logic. Also tracked in-memory (see get_and_clear_dropped_this_run) so main.py can
+    fire ONE consolidated end-of-run notification instead of one per drop."""
+    _dropped_this_process.append((company, title))
     file_exists = os.path.exists(config.DROPPED_VERIFICATION_PATH)
     with open(config.DROPPED_VERIFICATION_PATH, "a", encoding="utf-8", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=_DROPPED_FIELDNAMES)
@@ -142,6 +147,15 @@ def log_dropped_verification(company: str, title: str, url: str, reason: str, at
             "date": date.today().isoformat(), "company": _csv_safe(company), "title": _csv_safe(title),
             "url": _csv_safe(url), "reason": reason, "attempts": attempts,
         })
+
+
+def get_and_clear_dropped_this_run() -> list[tuple[str, str]]:
+    """(company, title) for every candidate dropped so far this process -- read once
+    at the end of a run, then cleared (so a long-lived process, e.g. tests reusing the
+    module, never double-counts)."""
+    dropped = list(_dropped_this_process)
+    _dropped_this_process.clear()
+    return dropped
 
 
 def log_skipped_detail(record: dict) -> None:

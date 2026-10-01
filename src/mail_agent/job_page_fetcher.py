@@ -230,17 +230,22 @@ _BROWSER_HEADERS = {
 # Real incident: review_closed_positions.py's link-liveness sweep (one fetch per active
 # tracked row, ~100+ rows) hit HTTP 429/999 (LinkedIn's own "bot detected" code) 22 times
 # in a single run. Without a circuit breaker, EVERY remaining LinkedIn URL in that run
-# still burns 2 URL forms x 3 attempts x delays on a fetch that's already guaranteed to
-# fail once LinkedIn has flagged this IP/session -- wasting minutes and very likely
-# deepening the block. Once tripped, LinkedIn fetches are skipped outright (no network
-# call at all) for the rest of THIS process run; a fresh script invocation (each is its
-# own process) always gets a clean attempt again.
-_LINKEDIN_BACKOFF_SECONDS = 900  # 15 min -- comfortably longer than one run takes
-_linkedin_blocked_until = 0.0
-
-
-def _is_linkedin_host(url: str) -> bool:
-    return classify_platform(url) == "linkedin"
+# still burns multiple attempts/delays on a fetch that's already guaranteed to fail
+# once a platform has flagged this IP/session -- wasting minutes and very likely
+# deepening the block. Once tripped for a platform, its fetches are skipped outright
+# (no network call at all) for the rest of THIS process run; a fresh script invocation
+# (each is its own process) always gets a clean attempt again.
+#
+# Real incident: this breaker originally only covered LinkedIn (429/999) -- Indeed's
+# tracking links return a flat 403 on EVERY single candidate, every run, with no
+# breaker at all, so each one was independently fetched and failed instead of the run
+# recognizing after the first "Indeed is blocking us" and skipping the rest. Generalized
+# to any known platform, and to every status code empirically seen from bot detection
+# on these two platforms (401, 403, 429, 999) -- never applied to "other" (a random
+# company's own site), where one page's access rule says nothing about another's.
+_PLATFORM_BACKOFF_SECONDS = 900  # 15 min -- comfortably longer than one run takes
+_BLOCK_STATUS_CODES = (401, 403, 429, 999)
+_platform_blocked_until: dict[str, float] = {}
 
 
 # Known job-board hosts whose fetch failures are worth telling apart from a random
@@ -263,10 +268,18 @@ def classify_platform(url: str) -> str:
     return "other"
 
 
+def platform_rate_limited(url: str) -> bool:
+    """True if this URL's platform has already been blocked/rate-limited earlier in
+    this run -- callers should skip the network call entirely until this clears.
+    Always False for "other" (non-platform) hosts -- a block is only ever recorded
+    for a recognized platform, see classify_platform."""
+    platform = classify_platform(url)
+    return platform != "other" and time.time() < _platform_blocked_until.get(platform, 0.0)
+
+
 def linkedin_rate_limited() -> bool:
-    """True if LinkedIn has already rate-limited/blocked a fetch earlier in this run --
-    callers should skip further LinkedIn network calls entirely until this clears."""
-    return time.time() < _linkedin_blocked_until
+    """Backward-compatible alias -- see platform_rate_limited."""
+    return platform_rate_limited("https://www.linkedin.com/")
 
 
 def _fetch_html(url: str) -> str | None:
@@ -288,15 +301,15 @@ def _fetch_html(url: str) -> str | None:
             return resp.read().decode("utf-8", errors="replace")
     except urllib.error.HTTPError as exc:
         logger.warning("HTTP %s fetching %s", exc.code, short_url(url))
-        if exc.code in (429, 999) and _is_linkedin_host(url):
-            global _linkedin_blocked_until
-            if not linkedin_rate_limited():
+        platform = classify_platform(url)
+        if exc.code in _BLOCK_STATUS_CODES and platform != "other":
+            if not platform_rate_limited(url):
                 logger.error(
-                    "LinkedIn rate-limited this fetch (HTTP %s) -- skipping further LinkedIn "
-                    "fetches for the rest of this run (~%d min backoff).",
-                    exc.code, _LINKEDIN_BACKOFF_SECONDS // 60,
+                    "%s is blocking this fetch (HTTP %s) -- skipping further %s fetches "
+                    "for the rest of this run (~%d min backoff).",
+                    platform.capitalize(), exc.code, platform.capitalize(), _PLATFORM_BACKOFF_SECONDS // 60,
                 )
-            _linkedin_blocked_until = time.time() + _LINKEDIN_BACKOFF_SECONDS
+            _platform_blocked_until[platform] = time.time() + _PLATFORM_BACKOFF_SECONDS
         return None
     except (urllib.error.URLError, TimeoutError) as exc:
         logger.warning("Network error fetching %s: %s", short_url(url), exc)
@@ -320,7 +333,7 @@ def fetch_linkedin_posting(url: str) -> FetchedPosting:
     a fallback canonical URL are used before giving up -- this is content the
     recipient can see by clicking the link themselves, so a single failed attempt is
     not enough to give up."""
-    if linkedin_rate_limited():
+    if platform_rate_limited(url):
         logger.info("Skipping LinkedIn fetch (rate-limited earlier this run): %s", short_url(url))
         return FetchedPosting()
 
@@ -349,7 +362,7 @@ def fetch_linkedin_posting(url: str) -> FetchedPosting:
                     "Fetched %s (attempt %d/%d) but no description marker found (page length %d)",
                     short_url(candidate_url), attempt, _MAX_ATTEMPTS, len(html),
                 )
-            if linkedin_rate_limited():
+            if platform_rate_limited(candidate_url):
                 # Tripped by this very attempt -- stop immediately instead of burning the
                 # remaining attempts/URL forms on a fetch that's now guaranteed to fail.
                 logger.info("LinkedIn rate limit hit mid-fetch, stopping remaining attempts for: %s", short_url(url))
@@ -535,7 +548,16 @@ def fetch_generic_posting(url: str) -> FetchedPosting:
     """Best-effort fetch for any non-LinkedIn URL (company career pages included).
     No structured extraction is attempted -- `description` is the whole cleaned page
     text; callers decide whether to store it as-is or pull a snippet out of it via
-    `extract_snippet_near`. Returns an empty/False result on fetch failure."""
+    `extract_snippet_near`. Returns an empty/False result on fetch failure.
+
+    Real incident: Indeed's tracking links (the dominant URL form this function
+    fetches for new opportunities) return HTTP 403 on every single one, but this
+    function had no circuit breaker at all -- every Indeed candidate in a run
+    independently made its own doomed request instead of the run recognizing "Indeed
+    is blocking us" after the first and skipping the rest (see platform_rate_limited)."""
+    if platform_rate_limited(url):
+        logger.info("Skipping fetch (platform rate-limited earlier this run): %s", short_url(url))
+        return FetchedPosting()
     html = _fetch_html(url)
     if not html:
         return FetchedPosting()

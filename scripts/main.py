@@ -225,9 +225,22 @@ def run(dry_run: bool = False, debug: bool = False) -> bool:
         elif os.path.exists(config.MAIL_QUEUE_INCOMPLETE_FLAG):
             os.remove(config.MAIL_QUEUE_INCOMPLETE_FLAG)
 
+    dropped = state.get_and_clear_dropped_this_run()
+    # One consolidated notification covering both issue types, not one per item and
+    # not one per type -- real incident: 3 ambiguous updates used to fire 3 individual
+    # toasts here PLUS a 4th summary toast, and every dropped candidate fired its own
+    # toast too. A run with several of each used to produce a wall of notifications
+    # for what's really just "N items need your attention."
+    parts = []
     if ambiguous_count:
-        summary = f"{ambiguous_count} ambiguous status update(s) this run -- check [NEEDS REVIEW] log lines."
-        logger.warning("[RUN SUMMARY] %s", summary)
+        parts.append(f"{ambiguous_count} ambiguous status update(s) -- check [NEEDS REVIEW] log lines")
+    if dropped:
+        names = ", ".join(f"{c} - {t}" for c, t in dropped[:5])
+        more = f" (+{len(dropped) - 5} more)" if len(dropped) > 5 else ""
+        parts.append(f"{len(dropped)} position(s) dropped after repeated verification failures: {names}{more}")
+    if parts:
+        summary = "[RUN SUMMARY] " + "; ".join(parts) + ". See data/dropped_verification.csv for details."
+        logger.warning(summary)
         notifier.notify_needs_review(summary)
 
     return not stopped_early

@@ -25,7 +25,6 @@ from .. import company_directory
 from .. import config
 from .. import guardrails
 from .. import job_page_fetcher
-from .. import notifier
 from .. import position_resolver
 from .. import sheets_client
 from .. import state
@@ -73,17 +72,16 @@ def _give_up_or_retry(job_id: str, candidate: Candidate, retry_state: dict, reas
     link returns HTTP 403 on every fetch attempt -- a real, live posting the fetcher
     simply can't reach) and was silently dropped; it was only noticed because the user
     happened to be watching the terminal log at that exact moment. A drop is now
-    surfaced two ways so it's reviewable later instead of visible only in that instant:
-    a toast notification, and an append-only CSV (state.log_dropped_verification)."""
+    surfaced so it's reviewable later instead of visible only in that instant: an
+    append-only CSV (state.log_dropped_verification). No per-item toast here -- a run
+    with several blocked-platform drops used to fire one notification each; main.py
+    now fires a single consolidated end-of-run summary instead (see its own
+    [RUN SUMMARY] handling), the same pattern already used for ambiguous matches."""
     entry = retry_state.get(job_id) or {"attempts": 0, "candidate": dataclasses.asdict(candidate)}
     entry["attempts"] += 1
     if entry["attempts"] >= config.MAX_RESOLUTION_ATTEMPTS:
         retry_state.pop(job_id, None)
         state.log_dropped_verification(candidate.company, candidate.title, candidate.url, reason, entry["attempts"])
-        notifier.notify_needs_review(
-            f"Could not verify, dropped: {candidate.company} - {candidate.title}. "
-            f"See data/dropped_verification.csv to check it manually."
-        )
         return True
     retry_state[job_id] = entry
     return False

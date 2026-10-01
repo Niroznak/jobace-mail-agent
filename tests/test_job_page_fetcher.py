@@ -184,14 +184,16 @@ class TestExtractJobLinks:
         assert jpf.extract_job_links(html, "https://career.rafael.co.il/") == []
 
 
-class TestLinkedinRateLimitCircuitBreaker:
-    """Real incident: a single link-liveness sweep (review_closed_positions.py, one
-    fetch per active tracked row) hit HTTP 429/999 (LinkedIn's own bot-detected code)
-    22 times in one run -- every remaining LinkedIn URL still burned 2 URL forms x 3
-    attempts x delays on a fetch that was already guaranteed to fail."""
+class TestPlatformRateLimitCircuitBreaker:
+    """Real incidents: (1) a single link-liveness sweep hit HTTP 429/999 (LinkedIn's
+    bot-detected code) 22 times in one run -- every remaining LinkedIn URL still
+    burned attempts/delays on a fetch already guaranteed to fail. (2) Indeed's
+    tracking links return a flat 403 on EVERY candidate, every run, with no breaker
+    at all -- generalized from LinkedIn-only to any known platform (classify_platform),
+    never applied to "other" (a random company's own site)."""
 
     def setup_method(self):
-        jpf._linkedin_blocked_until = 0.0  # each test starts with a clean breaker
+        jpf._platform_blocked_until.clear()  # each test starts with a clean breaker
 
     teardown_method = setup_method
 
@@ -202,33 +204,63 @@ class TestLinkedinRateLimitCircuitBreaker:
             raise urllib.error.HTTPError(req.full_url, code, "blocked", {}, None)
         return _urlopen
 
-    def test_429_trips_the_breaker(self, monkeypatch):
+    def test_429_trips_the_linkedin_breaker(self, monkeypatch):
         monkeypatch.setattr(jpf.urllib.request, "urlopen", self._raise_http_error(429))
         assert jpf._fetch_html("https://www.linkedin.com/jobs/view/123/") is None
-        assert jpf.linkedin_rate_limited() is True
+        assert jpf.platform_rate_limited("https://www.linkedin.com/jobs/view/456/") is True
 
-    def test_999_trips_the_breaker(self, monkeypatch):
+    def test_999_trips_the_linkedin_breaker(self, monkeypatch):
         monkeypatch.setattr(jpf.urllib.request, "urlopen", self._raise_http_error(999))
         assert jpf._fetch_html("https://www.linkedin.com/jobs/view/123/") is None
-        assert jpf.linkedin_rate_limited() is True
+        assert jpf.platform_rate_limited("https://www.linkedin.com/jobs/view/456/") is True
 
-    def test_non_linkedin_host_does_not_trip_the_breaker(self, monkeypatch):
-        monkeypatch.setattr(jpf.urllib.request, "urlopen", self._raise_http_error(429))
-        assert jpf._fetch_html("https://example.com/job/123") is None
-        assert jpf.linkedin_rate_limited() is False
-
-    def test_other_status_codes_do_not_trip_the_breaker(self, monkeypatch):
+    def test_403_trips_the_indeed_breaker(self, monkeypatch):
+        # Real incident: every single Indeed tracking-link fetch returns 403 -- this
+        # status code must trip Indeed's breaker even though it never trips LinkedIn's
+        # (LinkedIn's own block code is 429/999, not 403).
         monkeypatch.setattr(jpf.urllib.request, "urlopen", self._raise_http_error(403))
-        assert jpf._fetch_html("https://www.linkedin.com/jobs/view/123/") is None
-        assert jpf.linkedin_rate_limited() is False
+        assert jpf._fetch_html("https://il.indeed.com/rc/clk/dl?jk=1") is None
+        assert jpf.platform_rate_limited("https://il.indeed.com/rc/clk/dl?jk=2") is True
 
-    def test_tripped_breaker_skips_fetch_entirely_with_no_network_call(self, monkeypatch):
-        jpf._linkedin_blocked_until = jpf.time.time() + 900
+    def test_tripping_indeed_does_not_affect_linkedin_and_vice_versa(self, monkeypatch):
+        monkeypatch.setattr(jpf.urllib.request, "urlopen", self._raise_http_error(403))
+        jpf._fetch_html("https://il.indeed.com/rc/clk/dl?jk=1")
+        assert jpf.platform_rate_limited("https://www.linkedin.com/jobs/view/1/") is False
+
+    def test_non_platform_host_never_trips_any_breaker(self, monkeypatch):
+        # A random company's own career site returning 403 for its own reasons must
+        # never be treated as a "platform-wide" block -- that's only tracked for
+        # recognized job-board platforms.
+        monkeypatch.setattr(jpf.urllib.request, "urlopen", self._raise_http_error(403))
+        assert jpf._fetch_html("https://example.com/careers/job/123") is None
+        assert jpf.platform_rate_limited("https://example.com/careers/job/999") is False
+
+    def test_unrelated_status_codes_do_not_trip_the_breaker(self, monkeypatch):
+        monkeypatch.setattr(jpf.urllib.request, "urlopen", self._raise_http_error(404))
+        assert jpf._fetch_html("https://www.linkedin.com/jobs/view/123/") is None
+        assert jpf.platform_rate_limited("https://www.linkedin.com/jobs/view/456/") is False
+
+    def test_tripped_linkedin_breaker_skips_fetch_entirely_with_no_network_call(self, monkeypatch):
+        jpf._platform_blocked_until["linkedin"] = jpf.time.time() + 900
         called = []
         monkeypatch.setattr(jpf.urllib.request, "urlopen", lambda *a, **k: called.append(1))
         result = jpf.fetch_linkedin_posting("https://www.linkedin.com/comm/jobs/view/123/?trackingId=x")
         assert result.description == "" and result.closed is False
         assert called == []  # no network call was made at all
+
+    def test_tripped_indeed_breaker_skips_generic_fetch_entirely(self, monkeypatch):
+        jpf._platform_blocked_until["indeed"] = jpf.time.time() + 900
+        called = []
+        monkeypatch.setattr(jpf.urllib.request, "urlopen", lambda *a, **k: called.append(1))
+        result = jpf.fetch_generic_posting("https://il.indeed.com/rc/clk/dl?jk=1")
+        assert result.description == "" and called == []
+
+    def test_generic_fetch_of_a_non_platform_site_is_unaffected_by_any_breaker(self, monkeypatch):
+        jpf._platform_blocked_until["indeed"] = jpf.time.time() + 900
+        jpf._platform_blocked_until["linkedin"] = jpf.time.time() + 900
+        monkeypatch.setattr(jpf, "_fetch_html", lambda url: "<html>Job description text here</html>")
+        result = jpf.fetch_generic_posting("https://example.com/careers/job/123")
+        assert result.description != ""
 
 
 class TestShortUrl:
