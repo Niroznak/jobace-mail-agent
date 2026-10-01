@@ -259,3 +259,58 @@ class TestClassifyPlatform:
 
     def test_malformed_url_is_other(self):
         assert jpf.classify_platform("not a url") == "other"
+
+
+class TestExtractJobLinksRejectsInformationalPages:
+    """Real incident: "benefits at Google" and "Google's EEO Policy" -- both URLs
+    under /about/careers/applications/... (containing the allowed "career" path
+    marker) -- got scored 73-83/100 and WRITTEN to the sheet as job postings."""
+
+    def test_rejects_benefits_and_eeo_pages_by_url_path(self):
+        html = """
+        <a href="/about/careers/applications/benefits/">benefits at Google</a>
+        <a href="/about/careers/applications/eeo/">Google's EEO Policy</a>
+        <a href="/job/12345">Senior Software Engineer, Infrastructure</a>
+        """
+        results = jpf.extract_job_links(html, "https://www.google.com/about/careers/")
+        titles = [t.lower() for t, _ in results]
+        assert not any("benefit" in t for t in titles)
+        assert not any("eeo" in t for t in titles)
+        assert any("senior software engineer" in t for t in titles)
+
+    def test_rejects_hiring_faq_by_title_phrase(self):
+        html = '<a href="/en-us/careers/ai-hiring-process">View the AI hiring FAQ</a>'
+        results = jpf.extract_job_links(html, "https://www.jll.com/en-us/careers/")
+        assert results == []
+
+    def test_strips_icon_ligature_text_from_titles(self):
+        # Real incident: Material Icons font ligatures leak as literal text --
+        # "View the AI hiring FAQ arrow_forward" -- when extracted via a plain regex.
+        html = '<a href="/job/999">Senior Data Engineer arrow_forward</a>'
+        results = jpf.extract_job_links(html, "https://example.com/careers/")
+        assert results and "arrow_forward" not in results[0][0].lower()
+        assert results[0][0].strip() == "Senior Data Engineer"
+
+
+class TestNormalizeJobUrl:
+    def test_strips_query_string(self):
+        assert jpf.normalize_job_url("https://x.com/job/1?src=abc&utm=123") == "x.com/job/1"
+
+    def test_identical_path_different_query_normalizes_the_same(self):
+        a = jpf.normalize_job_url("https://x.com/jobs/results/999-role?src=card1")
+        b = jpf.normalize_job_url("https://x.com/jobs/results/999-role?src=card2&session=xyz")
+        assert a == b
+
+
+class TestExtractJobLinksDedupsAcrossTrackingParams:
+    def test_same_posting_different_query_strings_counts_once(self):
+        # Real incident: Google's careers site linked the SAME dead posting 16 times
+        # with varying tracking query strings on one page -- exact-URL dedup let all
+        # 16 through as "distinct" candidates, each fetched and 404ing separately.
+        html = """
+        <a href="/jobs/results/999-role?src=card1">Technical Program Manager</a>
+        <a href="/jobs/results/999-role?src=card2&session=abc">Technical Program Manager</a>
+        <a href="/jobs/results/999-role?utm_source=email">Technical Program Manager</a>
+        """
+        results = jpf.extract_job_links(html, "https://www.google.com/about/careers/")
+        assert len(results) == 1

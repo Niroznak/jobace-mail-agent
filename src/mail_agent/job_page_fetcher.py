@@ -374,8 +374,18 @@ def fetch_raw_html(url: str) -> str | None:
 
 
 _ANCHOR_RE = re.compile(r'<a\s+[^>]*href="([^"]+)"[^>]*>(.*?)</a>', re.IGNORECASE | re.DOTALL)
+# Real incident: with bare "career" as an allowed marker, a company's generic
+# /careers/<anything> section matched EVERY sub-page under it, not just job listings --
+# "employee-stories" (JLL), "benefits" and "eeo" (Google, caught separately by
+# _INFO_PAGE_PATH_MARKERS below) all slipped through this way. "career"/"careers" is
+# deliberately NOT included: a denylist of informational-page names is reactive and
+# always incomplete (there will always be another "our culture"/"meet the team" page);
+# requiring an actual job-specific marker is the structural fix. A career site whose
+# individual postings have no such marker in their URL correctly yields zero
+# candidates (same safe-failure as a JS-rendered page) rather than accepting anything
+# under /careers/.
 _JOB_LINK_PATH_MARKERS = (
-    "job", "jobs", "position", "vacancy", "career", "req", "posting",
+    "job", "jobs", "position", "vacancy", "req", "posting",
     # Known ATS platforms companies embed job listings from under their own domain
     # (e.g. acsmotioncontrol.com/comeet/...) -- a real, reliable job-link signal even
     # when the URL's own path has no job-related word in it at all (Comeet's own path
@@ -383,11 +393,46 @@ _JOB_LINK_PATH_MARKERS = (
     "comeet", "greenhouse", "lever", "workday", "ashby", "smartrecruiters",
     "recruitee", "bamboohr", "icims", "jazzhr", "breezy", "workable",
 )
+# Checked BEFORE _JOB_LINK_PATH_MARKERS: a company's /careers/ section routinely has
+# informational sub-pages (benefits, EEO policy, hiring FAQ, accessibility statement)
+# that all contain "career" in their path and would otherwise pass the marker check
+# above. Real incident: google.com/about/careers/applications/benefits/ and .../eeo/
+# both got scored and written to the sheet as job postings.
+_INFO_PAGE_PATH_MARKERS = (
+    "/benefits", "/eeo", "/equal-opportunity", "/equal-employment", "/diversity",
+    "/accessibility", "/faq", "/hiring-process", "/hiring-faq", "/culture",
+    "/life-at", "/about", "/privacy", "/terms", "/legal", "/sitemap", "/contact",
+)
 _NAV_NOISE_WORDS = {
     "home", "about", "about us", "contact", "contact us", "login", "log in", "sign in",
     "search", "filter", "filters", "reset", "next", "previous", "back", "menu",
     "privacy policy", "terms", "cookie", "cookies", "faq", "careers", "all jobs",
 }
+# Real incident: three informational career-site pages -- "benefits at Google",
+# "Google's EEO Policy", "View the AI hiring FAQ arrow_forward" -- all got scored
+# (73-83/100) and WRITTEN to the sheet as if they were specific job postings. None
+# are exact matches in _NAV_NOISE_WORDS (checked by full equality, and these are
+# multi-word titles with real-looking surrounding text), and their URL paths all
+# contain "career" (an allowed _JOB_LINK_PATH_MARKERS term), so a company's own
+# /careers/applications/benefits/ or /careers/applications/eeo/ page passed every
+# other check. Checked as a substring against the title, same as _CTA_NOISE_PHRASES.
+_INFO_PAGE_NOISE_PHRASES = (
+    "benefit", "eeo", "equal employment", "equal opportunity employer", "diversity",
+    "accessibility", "hiring process", "hiring faq", "our culture", "life at",
+    "employee resource group", "interview process", "how we hire", "application process",
+)
+# Material Symbols/Icons font ligatures: the icon is rendered by styling a LITERAL
+# text node reading e.g. "arrow_forward" as a glyph -- the raw anchor text extraction
+# here sees that literal word, not the rendered arrow. Confirmed case: "View the AI
+# hiring FAQ arrow_forward" (Google careers). Stripped before title validation so a
+# real title isn't rejected just for sitting next to an icon, and a pure-icon anchor
+# doesn't masquerade as a short "title".
+_ICON_LIGATURE_RE = re.compile(
+    r"\b(?:arrow_(?:forward|back|upward|downward|right|left|drop_down|drop_up)|"
+    r"chevron_(?:right|left|up|down)|keyboard_arrow_\w+|open_in_new|expand_(?:more|less)|"
+    r"navigate_(?:next|before))\b",
+    re.IGNORECASE,
+)
 # Generic call-to-action link text used across many career-page templates for a
 # card's "go to detail page" link, with the real title living in a separate heading
 # element the anchor-only regex can't see. Real bug: "Read More >" (HTML-entity
@@ -405,6 +450,19 @@ _CTA_NOISE_PHRASES = (
 _MIN_TITLE_LEN = 10
 _MAX_TITLE_LEN = 100
 _NAV_CHROME_RE = re.compile(r"(?is)<(nav|header|footer)\b[^>]*>.*?</\1>")
+
+
+def normalize_job_url(url: str) -> str:
+    """host+path only, no query string -- the identity of "the same posting" for
+    dedup purposes. Real incident: a career site (Google's) linked the same posting
+    many times with different tracking query strings, so exact-URL dedup treated each
+    as new both within one scan (extract_job_links) and across scheduled runs
+    (scan_career_pages.py's persisted seen-postings state)."""
+    try:
+        parsed = urllib.parse.urlsplit(url)
+    except ValueError:
+        return url
+    return f"{parsed.netloc.lower()}{parsed.path}"
 
 
 def extract_job_links(html: str, base_url: str) -> list[tuple[str, str]]:
@@ -434,6 +492,7 @@ def extract_job_links(html: str, base_url: str) -> list[tuple[str, str]]:
         href, inner_html = match.group(1), match.group(2)
         title = _TAG_RE.sub(" ", inner_html)
         title = html_module.unescape(title)
+        title = _ICON_LIGATURE_RE.sub(" ", title)
         title = re.sub(r"\s+", " ", title).strip()
         if not (_MIN_TITLE_LEN <= len(title) <= _MAX_TITLE_LEN):
             continue
@@ -442,12 +501,16 @@ def extract_job_links(html: str, base_url: str) -> list[tuple[str, str]]:
             continue
         if any(phrase in title_lower for phrase in _CTA_NOISE_PHRASES):
             continue
+        if any(phrase in title_lower for phrase in _INFO_PAGE_NOISE_PHRASES):
+            continue
 
         absolute_url = urllib.parse.urljoin(base_url, href)
         parsed = urllib.parse.urlparse(absolute_url)
         if parsed.netloc.lower() != base_domain:
             continue
         path_lower = parsed.path.lower()
+        if any(marker in path_lower for marker in _INFO_PAGE_PATH_MARKERS):
+            continue
         # Real bug: a bare "3+ digits anywhere in the path" fallback (since removed)
         # matched "402" inside a product page's model-number slug
         # ("/products/ds402-ethercat-servo-drives/"), which then got scored and
@@ -456,9 +519,14 @@ def extract_job_links(html: str, base_url: str) -> list[tuple[str, str]]:
         if not any(marker in path_lower for marker in _JOB_LINK_PATH_MARKERS):
             continue
 
-        if absolute_url in seen_urls:
+        # Real incident: Google's careers site links the SAME posting many times with
+        # different tracking query strings (?src=..., session ids, etc.) -- deduping
+        # on the exact URL let 16 near-identical links for one dead posting through in
+        # a single scan, each fetched and 404ing separately. Dedup on host+path only.
+        dedup_key = normalize_job_url(absolute_url)
+        if dedup_key in seen_urls:
             continue
-        seen_urls.add(absolute_url)
+        seen_urls.add(dedup_key)
         results.append((title, absolute_url))
     return results
 

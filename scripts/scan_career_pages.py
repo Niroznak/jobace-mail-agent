@@ -94,14 +94,18 @@ def run(dry_run: bool = False) -> None:
             logger.debug("[NO LINKS] '%s' -> likely JS-rendered listing page, nothing extractable.", company)
             continue
 
+        # Dedup on host+path, not the exact URL -- a career site can link the same
+        # posting with varying tracking query strings across runs (see
+        # job_page_fetcher.normalize_job_url's docstring), which exact-URL matching
+        # would treat as a "new" posting every single run forever.
         already_seen = set(seen.get(company, []))
-        new_links = [(title, url) for title, url in candidates if url not in already_seen]
+        new_links = [(title, url) for title, url in candidates if job_page_fetcher.normalize_job_url(url) not in already_seen]
         if not new_links:
             continue
 
         seen.setdefault(company, [])
         for title, url in new_links:
-            seen[company].append(url)  # mark seen regardless of outcome -- never re-considered
+            seen[company].append(job_page_fetcher.normalize_job_url(url))  # mark seen regardless of outcome -- never re-considered
 
             # Real incident: a career page's own nav link to its /jobs listing page
             # ("Open Positions") passed extract_job_links' denylist, passed the
